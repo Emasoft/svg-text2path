@@ -13,6 +13,17 @@ dependencies = [
     "uharfbuzz>=0.52.0",
 ]
 
+[project.scripts]
+text2path = "text2path.main:main"
+frame-comparer = "text2path.frame_comparer:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["text2path"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.1",
