@@ -7,6 +7,13 @@ __pycache__/
 *.egg
 *.whl
 .pytest_cache/
+.python-version
+
+# Editor / tooling
+.vscode/
+.idea/
+.serena/
+.DS_Store
 
 # Virtual envs
 .venv/
@@ -24,10 +31,10 @@ coverage.xml
 htmlcov/
 *.log
 *.tmp
+*.png
 
 # App-specific
 history/
 /tmp/
 comparisons.html
 diffs/
-
