@@ -14,8 +14,12 @@ dependencies = [
 ]
 
 [project.scripts]
-text2path = "text2path.main:main"
-frame-comparer = "text2path.frame_comparer:main"
+t2p_convert = "text2path.main:main"
+t2p_compare = "text2path.frame_comparer:main"
+t2p_font_report = "text2path.font_report:main"
+t2p_font_report_html = "text2path.font_report_html:main"
+t2p_analyze_path = "text2path.analyze_path:main"
+t2p_text_flow_test = "text2path.text_flow_tester:main"
 
 [build-system]
 requires = ["setuptools>=61"]
