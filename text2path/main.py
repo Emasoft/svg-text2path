@@ -1001,16 +1001,13 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
     # 8. Shape text with HarfBuzz and render glyphs (chunk-based, anchor once)
     import bisect
     all_paths = []
-    advance_x = 0.0
+    advance_x = 0.0  # legacy total advance across lines
+    line_decors: list[tuple[float, float, float]] = []  # (start_x, end_x, baseline_y)
 
-    # Include baked scale in anchoring if present
-    anchor_scale = 1.0
-    if transform_attr and baked_matrix:
-        a,b,c,d,e,f = baked_matrix
-        sx = abs(a)
-        sy = abs(d)
-        anchor_scale = (sx + sy) / 2.0 if (sx or sy) else 1.0
+    anchor_scale = 1.0  # Anchor computed in local coordinates; transform applied later with glyphs
     text_anchor_offset_global *= anchor_scale
+
+    path_len = path_obj.length() if path_obj is not None else None
 
     # Group chunks by baseline (y) to anchor per line (handles multiple tspans sharing a line)
     lines: list[list[dict]] = []
@@ -1028,9 +1025,34 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
     if current_line:
         lines.append(current_line)
 
+    def _measure_line(line_chunks: list[dict]) -> float:
+        total = 0.0
+        for chunk in line_chunks:
+            seg_scale = chunk['scale'] or 1.0
+            seg_positions = chunk['positions']
+            seg_infos = chunk['infos']
+            local_offset = chunk['local_offset']
+            run_text = chunk['run_text']
+            seg_len = chunk['end'] - chunk['start']
+            seg_text = run_text[local_offset:local_offset + seg_len]
+            local_byte_offsets = [0]
+            acc_local = 0
+            for ch in seg_text:
+                acc_local += len(ch.encode('utf-8'))
+                local_byte_offsets.append(acc_local)
+            for info, pos in zip(seg_infos, seg_positions):
+                cluster = info.cluster
+                char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
+                char_idx = chunk['start'] + char_idx_local
+                current_dx = dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
+                add_spacing = letter_spacing
+                if text_content[char_idx:char_idx+1] == ' ':
+                    add_spacing += word_spacing
+                total += pos.x_advance * seg_scale + current_dx + add_spacing
+        return total
+
     for line_chunks in lines:
-        # recompute width per line
-        line_total = sum(c['width'] for c in line_chunks)
+        line_total = _measure_line(line_chunks)
         line_anchor_offset = 0.0
         if text_anchor == 'middle':
             line_anchor_offset = -line_total / 2.0
@@ -1038,113 +1060,193 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
             line_anchor_offset = -line_total
         line_anchor_offset *= anchor_scale
 
+        advance_x_line = 0.0
+        line_baseline = line_chunks[0].get('line_y', y) if line_chunks else y
+
         for chunk in line_chunks:
             seg_ttfont = chunk['ttfont']
             seg_scale = chunk['scale'] or 1.0
             seg_infos = chunk['infos']
             seg_positions = chunk['positions']
             seg_glyph_set = chunk['glyph_set']
-        run_text = chunk['run_text']
-        local_offset = chunk['local_offset']
-        seg_len = chunk['end'] - chunk['start']
-        seg_text = run_text[local_offset:local_offset + seg_len]
+            run_text = chunk['run_text']
+            local_offset = chunk['local_offset']
+            seg_len = chunk['end'] - chunk['start']
+            seg_text = run_text[local_offset:local_offset + seg_len]
 
-        # Byte offsets local to this segment
-        local_byte_offsets = [0]
-        acc_local = 0
-        for ch in seg_text:
-            acc_local += len(ch.encode('utf-8'))
-            local_byte_offsets.append(acc_local)
+            # Byte offsets local to this segment
+            local_byte_offsets = [0]
+            acc_local = 0
+            for ch in seg_text:
+                acc_local += len(ch.encode('utf-8'))
+                local_byte_offsets.append(acc_local)
 
-        for info, pos in zip(seg_infos, seg_positions):
-            cluster = info.cluster
-            char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
-            char_idx = chunk['start'] + char_idx_local
-            current_dx = dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
-            current_dy = dy_list[char_idx] if dy_list and char_idx < len(dy_list) else 0.0
+            for info, pos in zip(seg_infos, seg_positions):
+                cluster = info.cluster
+                char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
+                char_idx = chunk['start'] + char_idx_local
+                current_dx = dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
+                current_dy = dy_list[char_idx] if dy_list and char_idx < len(dy_list) else 0.0
 
-            glyph_id = info.codepoint
-            try:
-                glyph_name = seg_ttfont.getGlyphName(glyph_id)
-            except Exception:
-                glyph_name = None
-            glyph_missing = glyph_name in ('.notdef', 'missing', 'null') or glyph_id == 0
-            glyph = seg_glyph_set.get(glyph_name) if (glyph_name and not glyph_missing) else None
-            if glyph is None:
-                advance_x += pos.x_advance * seg_scale
-                continue
+                glyph_id = info.codepoint
+                try:
+                    glyph_name = seg_ttfont.getGlyphName(glyph_id)
+                except Exception:
+                    glyph_name = None
+                glyph_missing = glyph_name in ('.notdef', 'missing', 'null') or glyph_id == 0
+                glyph = seg_glyph_set.get(glyph_name) if (glyph_name and not glyph_missing) else None
+                if glyph is None:
+                    advance_x_line += pos.x_advance * seg_scale
+                    continue
 
-            pen = RecordingPen()
-            try:
-                glyph.draw(pen)
-            except Exception:
-                advance_x += pos.x_advance * seg_scale
-                continue
-            recording = pen.value
+                pen = RecordingPen()
+                try:
+                    glyph.draw(pen)
+                except Exception:
+                    advance_x_line += pos.x_advance * seg_scale
+                    continue
+                recording = pen.value
 
-            glyph_offset = 0.0
-            if len(text_content) == 1 and advance_x == 0:
-                xs = []
-                for op, args in recording:
-                    if op in ['moveTo', 'lineTo']:
-                        xs.append(args[0][0])
-                    elif op in ['qCurveTo', 'curveTo']:
-                        for px, py in args:
-                            xs.append(px)
-                if xs:
-                    min_x = min(xs); max_x = max(xs); visual_center = (min_x + max_x)/2
-                    if text_anchor == 'start':
-                        glyph_offset = min_x * seg_scale
-                    elif text_anchor == 'middle':
-                        glyph_offset = visual_center * seg_scale
-                    elif text_anchor == 'end':
-                        glyph_offset = max_x * seg_scale
+                glyph_offset = 0.0
+                if len(text_content) == 1 and advance_x_line == 0:
+                    xs = []
+                    for op, args in recording:
+                        if op in ['moveTo', 'lineTo']:
+                            xs.append(args[0][0])
+                        elif op in ['qCurveTo', 'curveTo']:
+                            for px, py in args:
+                                xs.append(px)
+                    if xs:
+                        min_x = min(xs); max_x = max(xs); visual_center = (min_x + max_x)/2
+                        if text_anchor == 'start':
+                            glyph_offset = min_x * seg_scale
+                        elif text_anchor == 'middle':
+                            glyph_offset = visual_center * seg_scale
+                        elif text_anchor == 'end':
+                            glyph_offset = max_x * seg_scale
 
-            glyph_x = x + line_anchor_offset + advance_x + current_dx + (pos.x_offset * seg_scale) - glyph_offset
-            glyph_y = y + (pos.y_offset * seg_scale) + current_dy
+                if path_obj is not None and path_len and path_len > 0:
+                    arc_pos = path_offset + line_anchor_offset + advance_x_line + current_dx + (pos.x_offset * seg_scale) - glyph_offset
+                    if arc_pos < 0:
+                        arc_pos = 0.0
+                    if arc_pos > path_len:
+                        arc_pos = path_len
+                    frac = arc_pos / path_len
+                    try:
+                        base_point = path_obj.point(frac)
+                        tangent = path_obj.tangent(frac)
+                    except Exception:
+                        base_point = complex(0, 0)
+                        tangent = complex(1, 0)
+                    if tangent == 0:
+                        tangent = complex(1, 0)
+                    # Normalized vectors
+                    t_len = abs(tangent)
+                    tangent_unit = tangent / t_len
+                    normal_unit = complex(-tangent_unit.imag, tangent_unit.real)
+                    offset_normal = (pos.y_offset * seg_scale) + current_dy
+                    base_x = base_point.real + normal_unit.real * offset_normal
+                    base_y = base_point.imag + normal_unit.imag * offset_normal
 
-            transformed_recording = []
-            for op, args in recording:
-                if op in ['moveTo', 'lineTo']:
-                    px, py = args[0]
-                    new_x = px * seg_scale + glyph_x
-                    new_y = -py * seg_scale + glyph_y
-                    if baked_matrix:
-                        a,b,c,d,e,f = baked_matrix
-                        new_x, new_y = (a*new_x + c*new_y + e, b*new_x + d*new_y + f)
-                    transformed_recording.append((op, [(new_x, new_y)]))
-                elif op == 'qCurveTo':
-                    new_args = []
-                    for px, py in args:
-                        nx = px * seg_scale + glyph_x
-                        ny = -py * seg_scale + glyph_y
-                        if baked_matrix:
-                            a,b,c,d,e,f = baked_matrix
-                            nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
-                        new_args.append((nx, ny))
-                    transformed_recording.append((op, new_args))
-                elif op == 'curveTo':
-                    new_args = []
-                    for px, py in args:
-                        nx = px * seg_scale + glyph_x
-                        ny = -py * seg_scale + glyph_y
-                        if baked_matrix:
-                            a,b,c,d,e,f = baked_matrix
-                            nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
-                        new_args.append((nx, ny))
-                    transformed_recording.append((op, new_args))
-                elif op == 'closePath':
-                    transformed_recording.append((op, args))
+                    cos_t = tangent_unit.real
+                    sin_t = tangent_unit.imag
 
-            path_data = recording_pen_to_svg_path(transformed_recording, precision)
-            if path_data:
-                all_paths.append(path_data)
+                    transformed_recording = []
+                    for op, args in recording:
+                        if op in ['moveTo', 'lineTo']:
+                            px, py = args[0]
+                            lx = px * seg_scale
+                            ly = -py * seg_scale
+                            rx = lx * cos_t - ly * sin_t
+                            ry = lx * sin_t + ly * cos_t
+                            new_x = base_x + rx
+                            new_y = base_y + ry
+                            if baked_matrix:
+                                a,b,c,d,e,f = baked_matrix
+                                new_x, new_y = (a*new_x + c*new_y + e, b*new_x + d*new_y + f)
+                            transformed_recording.append((op, [(new_x, new_y)]))
+                        elif op == 'qCurveTo':
+                            new_args = []
+                            for px, py in args:
+                                lx = px * seg_scale
+                                ly = -py * seg_scale
+                                rx = lx * cos_t - ly * sin_t
+                                ry = lx * sin_t + ly * cos_t
+                                nx = base_x + rx
+                                ny = base_y + ry
+                                if baked_matrix:
+                                    a,b,c,d,e,f = baked_matrix
+                                    nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
+                                new_args.append((nx, ny))
+                            transformed_recording.append((op, new_args))
+                        elif op == 'curveTo':
+                            new_args = []
+                            for px, py in args:
+                                lx = px * seg_scale
+                                ly = -py * seg_scale
+                                rx = lx * cos_t - ly * sin_t
+                                ry = lx * sin_t + ly * cos_t
+                                nx = base_x + rx
+                                ny = base_y + ry
+                                if baked_matrix:
+                                    a,b,c,d,e,f = baked_matrix
+                                    nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
+                                new_args.append((nx, ny))
+                            transformed_recording.append((op, new_args))
+                        elif op == 'closePath':
+                            transformed_recording.append((op, args))
+                else:
+                    glyph_x = x + line_anchor_offset + advance_x_line + current_dx + (pos.x_offset * seg_scale) - glyph_offset
+                    glyph_y = line_baseline + (pos.y_offset * seg_scale) + current_dy
 
-            add_spacing = letter_spacing
-            if text_content[char_idx:char_idx+1] == ' ':
-                add_spacing += word_spacing
-            advance_x += pos.x_advance * seg_scale + current_dx + add_spacing
+                    transformed_recording = []
+                    for op, args in recording:
+                        if op in ['moveTo', 'lineTo']:
+                            px, py = args[0]
+                            new_x = px * seg_scale + glyph_x
+                            new_y = -py * seg_scale + glyph_y
+                            if baked_matrix:
+                                a,b,c,d,e,f = baked_matrix
+                                new_x, new_y = (a*new_x + c*new_y + e, b*new_x + d*new_y + f)
+                            transformed_recording.append((op, [(new_x, new_y)]))
+                        elif op == 'qCurveTo':
+                            new_args = []
+                            for px, py in args:
+                                nx = px * seg_scale + glyph_x
+                                ny = -py * seg_scale + glyph_y
+                                if baked_matrix:
+                                    a,b,c,d,e,f = baked_matrix
+                                    nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
+                                new_args.append((nx, ny))
+                            transformed_recording.append((op, new_args))
+                        elif op == 'curveTo':
+                            new_args = []
+                            for px, py in args:
+                                nx = px * seg_scale + glyph_x
+                                ny = -py * seg_scale + glyph_y
+                                if baked_matrix:
+                                    a,b,c,d,e,f = baked_matrix
+                                    nx, ny = (a*nx + c*ny + e, b*nx + d*ny + f)
+                                new_args.append((nx, ny))
+                            transformed_recording.append((op, new_args))
+                        elif op == 'closePath':
+                            transformed_recording.append((op, args))
 
+                path_data = recording_pen_to_svg_path(transformed_recording, precision)
+                if path_data:
+                    all_paths.append(path_data)
+
+                add_spacing = letter_spacing
+                if text_content[char_idx:char_idx+1] == ' ':
+                    add_spacing += word_spacing
+                advance_x_line += pos.x_advance * seg_scale + current_dx + add_spacing
+
+        # Track per-line geometry for decorations
+        if path_obj is None:
+            start_x_line = x + line_anchor_offset
+            end_x_line = start_x_line + advance_x_line
+            line_decors.append((start_x_line, end_x_line, line_baseline))
+        advance_x = max(advance_x, advance_x_line)
 
     # Generate text decorations (underline, line-through)
     decoration = get_attr(text_elem, 'text-decoration', 'none')
@@ -1153,7 +1255,7 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
     if style_decoration:
         decoration = style_decoration.group(1)
 
-    if decoration and decoration != 'none' and advance_x > 0:
+    if decoration and decoration != 'none' and line_decors:
         # Get font metrics for decoration
         # Default values if metrics are missing
         underline_position = -0.1 * units_per_em
@@ -1178,45 +1280,29 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
         except Exception:
             pass
 
-        # Calculate decoration geometry
-        deco_paths = []
-        
-        # Start and end X for the line
-        # Note: advance_x includes the total width of the text
-        # We need to position it relative to the text start
-        
-        # Adjust for text-anchor
-        start_x = x + text_anchor_offset_global
-        end_x = start_x + advance_x
-        
-        if 'underline' in decoration:
-            # Draw underline rect
-            y_pos = y - (underline_position * scale) # Flip Y
-            thickness = underline_thickness * scale
-            
-            # Rectangle path: M start_x y_pos L end_x y_pos L end_x (y_pos+thickness) L start_x (y_pos+thickness) Z
-            # Note: SVG Y goes down, so "thickness" adds to Y
-            fmt = f"{{:.{precision}f}}"
-            deco_paths.append([(start_x, y_pos), (end_x, y_pos), (end_x, y_pos+thickness), (start_x, y_pos+thickness)])
-            
-        if 'line-through' in decoration:
-            # Draw strikeout rect
-            y_pos = y - (strikeout_position * scale) # Flip Y
-            thickness = strikeout_thickness * scale
-            
-            fmt = f"{{:.{precision}f}}"
-            deco_paths.append([(start_x, y_pos), (end_x, y_pos), (end_x, y_pos+thickness), (start_x, y_pos+thickness)])
+        fmt = f"{{:.{precision}f}}"
 
-        # Apply baked matrix to decoration and serialize as path
-        for rect in deco_paths:
-            pts = []
-            for (px, py) in rect:
-                if baked_matrix:
-                    a,b,c,d,e,f = baked_matrix
-                    px, py = (a*px + c*py + e, b*px + d*py + f)
-                pts.append((px, py))
-            deco_path = f"M {fmt.format(pts[0][0])} {fmt.format(pts[0][1])} L {fmt.format(pts[1][0])} {fmt.format(pts[1][1])} L {fmt.format(pts[2][0])} {fmt.format(pts[2][1])} L {fmt.format(pts[3][0])} {fmt.format(pts[3][1])} Z"
-            all_paths.append(deco_path)
+        for start_x, end_x, baseline_y in line_decors:
+            deco_paths = []
+            if 'underline' in decoration:
+                y_pos = baseline_y - (underline_position * scale)
+                thickness = underline_thickness * scale
+                deco_paths.append([(start_x, y_pos), (end_x, y_pos), (end_x, y_pos+thickness), (start_x, y_pos+thickness)])
+
+            if 'line-through' in decoration:
+                y_pos = baseline_y - (strikeout_position * scale)
+                thickness = strikeout_thickness * scale
+                deco_paths.append([(start_x, y_pos), (end_x, y_pos), (end_x, y_pos+thickness), (start_x, y_pos+thickness)])
+
+            for rect in deco_paths:
+                pts = []
+                for (px, py) in rect:
+                    if baked_matrix:
+                        a,b,c,d,e,f = baked_matrix
+                        px, py = (a*px + c*py + e, b*px + d*py + f)
+                    pts.append((px, py))
+                deco_path = f"M {fmt.format(pts[0][0])} {fmt.format(pts[0][1])} L {fmt.format(pts[1][0])} {fmt.format(pts[1][1])} L {fmt.format(pts[2][0])} {fmt.format(pts[2][1])} L {fmt.format(pts[3][0])} {fmt.format(pts[3][1])} Z"
+                all_paths.append(deco_path)
 
     if not all_paths:
         print(f"  ✗ No path data generated for text '{text_content}'")

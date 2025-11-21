@@ -20,3 +20,22 @@ Next time:
 - Revert to per-line anchoring before chunking.
 - Apply anchor after converting advances to path-length for textPath.
 - Keep chunk shaping but compute anchor per line, not globally.
+
+## Failed attempt: anchor scaling & partial textPath (2025-11-21)
+
+Goal: fix misalignment by baking transform scale into anchor offsets and add a first pass of textPath rotation.
+
+Changes made:
+- Multiplied anchor offsets by averaged transform scale before glyph placement.
+- Implemented textPath laying glyphs along the path tangent with rotation/normal offset; kept existing tspan handling.
+
+Outcome:
+- Diff barely improved (≈7.9% vs 8.3%). The scale tweak was counterproductive and later reverted; textPath handled but main diff persists.
+
+Why it failed:
+- Anchor pre-scaling double-applied transforms (anchors already scaled when glyph coordinates are baked), so positions stayed off for scaled text.
+- TextPath fix alone cannot recover the large diff coming from general layout/RTL issues.
+
+Next time:
+- Keep anchors in local coordinates and let the baked matrix scale everything.
+- Focus on accurate line measurement (letter/word spacing, dx/dy) and RTL run ordering; audit inline-size/anchor handling against Inkscape code.
