@@ -1851,10 +1851,9 @@ def main():
         prog="t2p_convert",
         description="Convert all SVG <text>/<tspan>/<textPath> to <path> outlines using HarfBuzz shaping.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Examples:
-  t2p_convert samples/test_text_to_path.svg
-  t2p_convert samples/test_text_to_path.svg /tmp/out.svg --precision 6
-""",
+        epilog="Examples:\n"
+               "  t2p_convert samples/test_text_to_path.svg\n"
+               "  t2p_convert samples/test_text_to_path.svg /tmp/out.svg --precision 6\n",
     )
     parser.add_argument("input_svg", help="Input SVG file")
     parser.add_argument("output_svg", nargs="?", help="Output SVG file (default: <input>_rust_paths.svg)")
@@ -1862,7 +1861,7 @@ def main():
         "--precision",
         type=int,
         default=28,
-        help="Decimal places for generated path coordinates (use 6 to roughly match Inkscape path output size).",
+        help="Decimal places for generated path coordinates (use 6 to roughly match Inkscape path size).",
     )
     args = parser.parse_args()
 
