@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.whl
+.pytest_cache/
+
+# Virtual envs
+.venv/
+.env/
+ENV/
+
+# macOS noise
+.DS_Store
+
+# Node / front-end
+node_modules/
+
+# Tooling outputs
+coverage.xml
+htmlcov/
+*.log
+*.tmp
+
+# App-specific
+history/
+/tmp/
+comparisons.html
+diffs/
+
