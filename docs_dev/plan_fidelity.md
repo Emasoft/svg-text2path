@@ -1,5 +1,14 @@
 # Plan to reach Inkscape-level diff (<=0.2%)
 
+## Progress snapshot — 2025-11-21
+- Implemented per-line chunk traversal fix (all chunks now placed) and textPath tangent placement with normal offsets; removed bad anchor pre-scaling. Diff on advanced sample: **7.99%** (down from ~8.35%, but far from the 0.2% target).
+- TextPath decorations still disabled; main gaps appear in RTL/multi-line placement and inline-size flow.
+
+Next immediate steps (still pending):
+- Audit RTL run ordering and dx/dy application per glyph vs Inkscape baseline logic.
+- Reproduce Inkscape inline-size/plain-SVG flow for multi-line tspans (reset x/y per span, simulate single-line when no explicit x/y).
+- Re-enable decorations after baseline is correct.
+
 1) Rebuild line/layout logic to match Inkscape plain-SVG flow
    - Parse tspans into “chunks” by x/y, dx/dy, role, and line changes (see docs_dev/inkscape_font_classes/sp-text.cpp and Layout-TNG-*.cpp).
    - Treat each text element as a single line unless explicit x/y on tspans; honor per-tspan anchors (start/middle/end) but compute the line anchor once after measuring all chunks.

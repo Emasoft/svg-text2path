@@ -1,32 +1,30 @@
-# Text-to-Path Converter V3
+# Text-to-Path Converter
 
-A robust Python tool to convert SVG text elements into vector paths, preserving visual fidelity.
+Python CLI suite to convert all SVG text (text/tspan/textPath) into outline paths with HarfBuzz shaping, and to compare results against Inkscape/reference renders.
 
 ## Features
-- **Unicode BiDi Support**: Correctly handles Right-to-Left languages like Arabic and Hebrew.
-- **HarfBuzz Shaping**: Uses the industry-standard shaping engine for proper ligatures and contextual forms.
-- **Font Fallback**: Matches fonts using system configuration (fontconfig), similar to browsers.
-- **Visual Fidelity**: Replicates the visual output of the Rust implementation.
+- Unicode BiDi + HarfBuzz shaping (ligatures, RTL, complex scripts)
+- Strict font matching (fails on missing fonts; no silent fallbacks)
+- TextPath support with tangent-based placement
+- Visual diff helper with HTML history (`t2p_compare`)
 
-## Installation
+## Install
 
 ```bash
-cd text2path
 uv pip install -r requirements.txt
 ```
 
-## Usage
+## CLI tools
 
-```bash
-# Convert an SVG file
-python src/main.py input.svg [output.svg]
-```
+- `t2p_convert input.svg [output.svg] [--precision N]` – convert text to paths; fails if any text remains or font is missing.
+- `t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--history-dir ./history] [--no-html]` – render+diff PNGs (Inkscape backend) and optional HTML summary.
+- Diagnostics: `t2p_font_report`, `t2p_font_report_html`, `t2p_analyze_path`, `t2p_text_flow_test`.
 
-If output path is not specified, it defaults to `input_rust_paths.svg`.
+## Current status (2025-11-21)
+- Advanced sample diff: **7.99%** vs original (target ~0.2% like Inkscape reference at 0.1977%).
+- Recent work: per-line chunk traversal fixed, textPath tangent placement, anchor pre-scaling removed. Remaining issues likely in RTL/inline-size flow and per-glyph dx/dy handling.
 
 ## Requirements
-- `fonttools`
-- `python-bidi`
-- `uharfbuzz`
-- System fonts (uses `fc-match` from fontconfig)
-- `magick` (ImageMagick) for generating comparison JPEGs (optional)
+- `fonttools`, `python-bidi`, `uharfbuzz`
+- Fontconfig (`fc-match`, `fc-list`) available on PATH
+- `inkscape` for rendering/diff, `magick` optional for quick JPEG previews
