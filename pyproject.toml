@@ -1,0 +1,19 @@
+[project]
+name = "text2path"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fonttools>=4.60.1",
+    "numpy>=2.2.6",
+    "pillow>=12.0.0",
+    "python-bidi>=0.6.7",
+    "svg-path>=7.0",
+    "uharfbuzz>=0.52.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
+]

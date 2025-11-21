@@ -1,0 +1,6 @@
+fonttools
+python-bidi
+uharfbuzz
+numpy
+pillow
+svg.path
