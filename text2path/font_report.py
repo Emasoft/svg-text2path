@@ -4,17 +4,13 @@ Font report generator for SVG texts.
 Outputs a markdown table mapping text element id -> requested font attributes -> resolved font file (using our fuzzy matcher).
 """
 import re
-import importlib.machinery
-import importlib.util
+import importlib.import_module
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 def load_fontcache():
-    loader = importlib.machinery.SourceFileLoader('t2p_main','src/main.py')
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module.FontCache()
+    from text2path.main import FontCache
+    return FontCache()
 
 def parse_style(style_str):
     if not style_str:
@@ -77,9 +73,13 @@ def collect(svg_path: Path):
 
 def main():
     import argparse
-    ap=argparse.ArgumentParser()
-    ap.add_argument('svg', type=Path, help='SVG file')
-    ap.add_argument('-o','--out', type=Path, default=Path('font_report.md'))
+    ap=argparse.ArgumentParser(
+        prog="t2p_font_report",
+        description="Generate a markdown table of text element font attributes and the resolved font file.",
+        epilog="Example: t2p_font_report samples/test_text_to_path_advanced.svg -o font_report.md",
+    )
+    ap.add_argument('svg', type=Path, help='Input SVG file')
+    ap.add_argument('-o','--out', type=Path, default=Path('font_report.md'), help='Output markdown file (default: font_report.md)')
     args=ap.parse_args()
     rows=collect(args.svg)
     lines=[]

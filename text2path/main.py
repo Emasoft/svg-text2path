@@ -1844,14 +1844,26 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
 
 
 def main():
-    """Main entry point."""
+    """CLI entry for t2p_convert."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Convert SVG text to paths (Rust-style).")
+    parser = argparse.ArgumentParser(
+        prog="t2p_convert",
+        description="Convert all SVG <text>/<tspan>/<textPath> to <path> outlines using HarfBuzz shaping.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  t2p_convert samples/test_text_to_path.svg
+  t2p_convert samples/test_text_to_path.svg /tmp/out.svg --precision 6
+""",
+    )
     parser.add_argument("input_svg", help="Input SVG file")
     parser.add_argument("output_svg", nargs="?", help="Output SVG file (default: <input>_rust_paths.svg)")
-    parser.add_argument("--precision", type=int, default=28,
-                        help="Decimal places for generated path coordinates (default 28; use 6 to approximate Inkscape path output size).")
+    parser.add_argument(
+        "--precision",
+        type=int,
+        default=28,
+        help="Decimal places for generated path coordinates (use 6 to roughly match Inkscape path output size).",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input_svg)

@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from frame_comparer import SVGRenderer, ImageComparator
+from text2path.frame_comparer import SVGRenderer, ImageComparator
 
 
 def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Path]:
@@ -58,7 +58,7 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
 
 
 def run_converter(single_svg: Path, converted_svg: Path, precision: int = 6):
-    cmds = ["python", "src/main.py", str(single_svg), str(converted_svg), "--precision", str(precision)]
+    cmds = ["t2p_convert", str(single_svg), str(converted_svg), "--precision", str(precision)]
     subprocess.run(cmds, check=True)
 
 
@@ -78,12 +78,16 @@ def compare(ref_svg: Path, cmp_svg: Path, workdir: Path, dpi: int = 96):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--svg", required=True, type=Path)
-    ap.add_argument("--id", required=True)
-    ap.add_argument("--work", type=Path, default=None)
-    ap.add_argument("--precision", type=int, default=6)
-    ap.add_argument("--annotate-only", action="store_true", help="Only dump font annotations, no convert/compare")
+    ap = argparse.ArgumentParser(
+        prog="t2p_text_flow_test",
+        description="Extract a text element by id, convert with t2p_convert, render both, and diff PNGs.",
+        epilog="Example: t2p_text_flow_test --svg samples/test_text_to_path_advanced.svg --id text44 --work /tmp/flow",
+    )
+    ap.add_argument("--svg", required=True, type=Path, help="Source SVG file")
+    ap.add_argument("--id", required=True, help="text element id to extract and test")
+    ap.add_argument("--work", type=Path, default=None, help="Work directory (default: mktemp)")
+    ap.add_argument("--precision", type=int, default=6, help="Precision for t2p_convert")
+    ap.add_argument("--annotate-only", action="store_true", help="Only extract element; skip convert/compare")
     args = ap.parse_args()
 
     workdir = args.work or Path(tempfile.mkdtemp(prefix="flowtest_"))

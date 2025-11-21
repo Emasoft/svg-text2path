@@ -2,6 +2,7 @@ import sys
 import re
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import argparse
 
 def get_bbox(svg_path):
     tree = ET.parse(svg_path)
@@ -35,5 +36,15 @@ def get_bbox(svg_path):
     # First point
     print(f"Start Point: ({xs[0]:.2f}, {ys[0]:.2f})")
 
+def main():
+    parser = argparse.ArgumentParser(
+        prog="t2p_analyze_path",
+        description="Compute a rough bounding box for the first <path> in an SVG (debug helper).",
+        epilog="Example: t2p_analyze_path samples/test_text_to_path_advanced.svg",
+    )
+    parser.add_argument("svg", type=Path, help="SVG file containing a <path>")
+    args = parser.parse_args()
+    get_bbox(args.svg)
+
 if __name__ == "__main__":
-    get_bbox(sys.argv[1])
+    main()

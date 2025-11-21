@@ -10,19 +10,14 @@ Each row shows emojis on each pair (✅ auto same, ❔ unsure) and a GPT5 verdic
 Adds a final summary row with SAME/total.
 """
 
-import importlib.machinery
-import importlib.util
 import xml.etree.ElementTree as ET
 import re
 from pathlib import Path
 import subprocess
+import text2path.main as main
 
 def load_main():
-    loader = importlib.machinery.SourceFileLoader('t2p_main','src/main.py')
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+    return main
 
 def parse_style(style_str: str):
     if not style_str:
@@ -216,10 +211,14 @@ td.user {{ background:#fff8cc; }}
 
 def main():
     import argparse
-    ap=argparse.ArgumentParser()
-    ap.add_argument("svg", type=Path)
-    ap.add_argument("-o","--out", type=Path, default=Path("/tmp/font_report.html"))
-    ap.add_argument("--open", action="store_true")
+    ap=argparse.ArgumentParser(
+        prog="t2p_font_report_html",
+        description="Generate an HTML font mapping report for an SVG (orig values vs resolved font file values).",
+        epilog="Example: t2p_font_report_html samples/test_text_to_path_advanced.svg -o report.html",
+    )
+    ap.add_argument("svg", type=Path, help="Input SVG file")
+    ap.add_argument("-o","--out", type=Path, default=Path("/tmp/font_report.html"), help="Output HTML file")
+    ap.add_argument("--open", action="store_true", help="Open the HTML in Chrome after generation")
     args=ap.parse_args()
     out=generate(args.svg, args.out)
     print(f"Wrote {out}")

@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 """
-Frame Comparer - CLI tool for comparing SVG files visually
-
-Renders SVG files to PNG and performs pixel-perfect comparison with detailed diff output.
-Based on the test suite's image comparison utilities.
+Frame Comparer (t2p_compare)
+----------------------------
+Render two SVGs with Inkscape, diff their PNGs pixel-perfectly, and (optionally) compare against an Inkscape text-to-path reference.
 
 Usage:
-    frame_comparer.py <svg1> <svg2> [--output-dir <dir>] [--tolerance <percent>] [--pixel-tolerance <fraction>]
+  t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--output-dir DIR] [--tolerance 0.2] [--pixel-tolerance 0.01]
 
 Examples:
-    # Basic comparison
-    frame_comparer.py input.svg output.svg
-
-    # With custom tolerance (0.04% difference allowed)
-    frame_comparer.py input.svg output.svg --tolerance 0.04
-
-    # Save diff images to custom directory
-    frame_comparer.py input.svg output.svg --output-dir ./diffs
-
-    # Strict pixel-perfect comparison
-    frame_comparer.py input.svg output.svg --tolerance 0.0 --pixel-tolerance 0.0
+  t2p_compare samples/test_text_to_path_advanced.svg /tmp/out.svg
+  t2p_compare samples/test_text_to_path_advanced.svg /tmp/out.svg --inkscape-svg samples/test_text_to_path_advanced_inkscape_paths.svg
+  t2p_compare a.svg b.svg -o ./diffs --tolerance 0.1 --pixel-tolerance 0.005 --keep-pngs
 """
 
 import argparse
