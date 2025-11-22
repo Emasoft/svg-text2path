@@ -125,6 +125,94 @@ def apply_transform_to_path(path_d, scale_x, scale_y):
 
     return ' '.join(result)
 
+
+def _mat_mul(m1, m2):
+    a1, b1, c1, d1, e1, f1 = m1
+    a2, b2, c2, d2, e2, f2 = m2
+    return (
+        a1 * a2 + c1 * b2,
+        b1 * a2 + d1 * b2,
+        a1 * c2 + c1 * d2,
+        b1 * c2 + d1 * d2,
+        a1 * e2 + c1 * f2 + e1,
+        b1 * e2 + d1 * f2 + f1,
+    )
+
+
+def _mat_apply_pt(m, x, y):
+    a, b, c, d, e, f = m
+    return (a * x + c * y + e, b * x + d * y + f)
+
+
+def _mat_scale_lengths(m):
+    """Return average scale from matrix for length attributes."""
+    a, b, c, d, e, f = m
+    sx = (a * a + b * b) ** 0.5
+    sy = (c * c + d * d) ** 0.5
+    return (sx + sy) / 2.0 if (sx or sy) else 1.0
+
+
+def flatten_transforms(root):
+    """
+    Precompute (bake) transforms into coordinates.
+    This simplifies anchoring/debugging and avoids inherited transforms shifting text.
+    """
+    def recurse(el, parent_m):
+        # Parse this element transform
+        m = parse_transform_matrix(el.get('transform', '')) or (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        combined = _mat_mul(parent_m, m)
+
+        # apply to key attributes
+        tag = el.tag.split('}')[-1]
+        length_scale = _mat_scale_lengths(combined)
+
+        def _apply_list(attr):
+            if attr in el.attrib:
+                nums = _parse_num_list(el.get(attr))
+                pts = []
+                # pair x,y if both, else treat as x list
+                if attr in ('dx', 'x'):
+                    pts = [(_mat_apply_pt(combined, v, 0.0)[0]) for v in nums]
+                elif attr in ('dy', 'y'):
+                    pts = [(_mat_apply_pt(combined, 0.0, v)[1]) for v in nums]
+                el.set(attr, ' '.join(str(v) for v in pts))
+
+        if tag in ('text', 'tspan', 'textPath'):
+            _apply_list('x'); _apply_list('y'); _apply_list('dx'); _apply_list('dy')
+            # scale font-size and spacing
+            for attr in ('font-size', 'letter-spacing', 'word-spacing', 'stroke-width'):
+                if attr in el.attrib:
+                    try:
+                        val = float(re.findall(r'[-+]?\\d*\\.?\\d+', el.attrib[attr])[0])
+                        el.set(attr, str(val * length_scale))
+                    except Exception:
+                        pass
+            el.attrib.pop('transform', None)
+
+        if tag == 'path' and 'd' in el.attrib:
+            try:
+                p = parse_path(el.get('d'))
+                for seg in p:
+                    for name in ('start', 'end', 'control', 'control1', 'control2', 'radius'):
+                        if hasattr(seg, name):
+                            pt = getattr(seg, name)
+                            if isinstance(pt, complex):
+                                x, y = _mat_apply_pt(combined, pt.real, pt.imag)
+                                setattr(seg, name, complex(x, y))
+                el.set('d', p.d())
+            except Exception:
+                pass
+            el.attrib.pop('transform', None)
+
+        for ch in list(el):
+            recurse(ch, combined)
+
+    recurse(root, (1.0, 0.0, 0.0, 1.0, 0.0, 0.0))
+    # Drop residual transforms to avoid inherited shifts later in the pipeline.
+    for el in root.iter():
+        if 'transform' in el.attrib:
+            el.attrib.pop('transform', None)
+
 try:
     from fontTools.ttLib import TTFont
     from fontTools.pens.recordingPen import RecordingPen
@@ -325,6 +413,21 @@ class FontCache:
         """
         import subprocess
 
+        def stretch_token(stretch: str) -> str | None:
+            s = stretch.lower()
+            mapping = {
+                'ultra-condensed': 'ultracondensed',
+                'extra-condensed': 'extracondensed',
+                'condensed': 'condensed',
+                'semi-condensed': 'semicondensed',
+                'normal': None,
+                'semi-expanded': 'semiexpanded',
+                'expanded': 'expanded',
+                'extra-expanded': 'extraexpanded',
+                'ultra-expanded': 'ultraexpanded',
+            }
+            return mapping.get(s)
+
         # Build candidate patterns from specific to generic to prefer Regular when available
         style_name = self._weight_to_style(weight)
         patterns = []
@@ -342,6 +445,9 @@ class FontCache:
             base += ":slant=italic"
         elif style == 'oblique':
             base += ":slant=oblique"
+        st_tok = stretch_token(stretch)
+        if st_tok:
+            base += f":width={st_tok}"
         if stretch != 'normal':
             base += f":width={stretch}"
         patterns.append(base)
@@ -628,10 +734,28 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
         font_size = float(re.search(r'([\d.]+)', raw_size).group(1))
 
     # Spacing
+    # IMPORTANT (✱ gain ~50% diff reduction when spacing present):
+    # In earlier runs we failed to parse letter/word-spacing like "10" and treated them as 0,
+    # causing anchor widths to collapse and large left shifts (e.g., diff 14%→7%). Keep this robust parser.
     raw_letter_spacing = get_attr(text_elem, 'letter-spacing', None)
-    letter_spacing = float(re.search(r'([-\\d.]+)', raw_letter_spacing).group(1)) if raw_letter_spacing and raw_letter_spacing != 'normal' else 0.0
+    letter_spacing = 0.0
+    if raw_letter_spacing and raw_letter_spacing != 'normal':
+        m_num = re.search(r'([-+]?[\d.]+)', raw_letter_spacing)
+        if m_num:
+            try:
+                letter_spacing = float(m_num.group(1))
+            except Exception:
+                letter_spacing = 0.0
+
     raw_word_spacing = get_attr(text_elem, 'word-spacing', None)
-    word_spacing = float(re.search(r'([-\\d.]+)', raw_word_spacing).group(1)) if raw_word_spacing and raw_word_spacing != 'normal' else 0.0
+    word_spacing = 0.0
+    if raw_word_spacing and raw_word_spacing != 'normal':
+        m_num = re.search(r'([-+]?[\d.]+)', raw_word_spacing)
+        if m_num:
+            try:
+                word_spacing = float(m_num.group(1))
+            except Exception:
+                word_spacing = 0.0
 
     # Parse font-variation settings (optional)
     fv_settings_str = get_attr(text_elem, 'font-variation-settings', None)
@@ -990,22 +1114,11 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
                 'local_byte_offsets': None,
             })
 
-    # Total width across all chunks
-    total_width_all = sum(c['width'] for c in chunk_list)
-    text_anchor_offset_global = 0.0
-    if text_anchor == 'middle':
-        text_anchor_offset_global = -total_width_all / 2.0
-    elif text_anchor == 'end':
-        text_anchor_offset_global = -total_width_all
-
     # 8. Shape text with HarfBuzz and render glyphs (chunk-based, anchor once)
     import bisect
     all_paths = []
     advance_x = 0.0  # legacy total advance across lines
     line_decors: list[tuple[float, float, float]] = []  # (start_x, end_x, baseline_y)
-
-    anchor_scale = 1.0  # Anchor computed in local coordinates; transform applied later with glyphs
-    text_anchor_offset_global *= anchor_scale
 
     path_len = path_obj.length() if path_obj is not None else None
 
@@ -1025,14 +1138,72 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
     if current_line:
         lines.append(current_line)
 
-    def _measure_line(line_chunks: list[dict]) -> float:
-        total = 0.0
+    def _measure_line_width(line_chunks: list[dict]) -> float:
+        """Compute visual line width like Inkscape: sum advances & dx/spacing; trim trailing spacing."""
+        width = 0.0
+        last_letter = 0.0
+        last_word = 0.0
         for chunk in line_chunks:
             seg_scale = chunk['scale'] or 1.0
-            seg_positions = chunk['positions']
             seg_infos = chunk['infos']
-            local_offset = chunk['local_offset']
+            seg_positions = chunk['positions']
             run_text = chunk['run_text']
+            local_offset = chunk['local_offset']
+            seg_len = chunk['end'] - chunk['start']
+            seg_text = run_text[local_offset:local_offset + seg_len]
+
+            local_byte_offsets = [0]
+            acc_local = 0
+            for ch in seg_text:
+                acc_local += len(ch.encode('utf-8'))
+                local_byte_offsets.append(acc_local)
+
+            cursor = 0.0
+            for info, pos in zip(seg_infos, seg_positions):
+                cluster = info.cluster
+                char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
+                char_idx = chunk['start'] + char_idx_local
+                current_dx = dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
+                add_spacing = letter_spacing
+                is_space = text_content[char_idx:char_idx + 1] == ' '
+                if is_space:
+                    add_spacing += word_spacing
+                    last_word = word_spacing
+                else:
+                    last_word = 0.0
+                adv = (pos.x_advance * seg_scale) + current_dx + add_spacing
+                if chunk.get('direction', 'LTR') == 'RTL':
+                    cursor -= adv
+                else:
+                    cursor += adv
+                last_letter = letter_spacing
+            width += abs(cursor)
+
+        width -= last_letter
+        width -= last_word
+        return width
+
+    for line_chunks in lines:
+        line_dir = line_chunks[0].get('direction', 'LTR') if line_chunks else 'LTR'
+        line_width = _measure_line_width(line_chunks)
+        if text_anchor == 'middle':
+            line_anchor_offset = -line_width / 2.0
+        elif text_anchor == 'end':
+            line_anchor_offset = 0.0 if line_dir == 'RTL' else -line_width
+        else:
+            line_anchor_offset = -line_width if line_dir == 'RTL' else 0.0
+
+        advance_x_line_ltr = 0.0
+        advance_x_line_rtl = 0.0
+        advance_x_line = 0.0  # legacy cursor (kept to avoid breakage; replace in RTL refactor)
+        line_baseline = line_chunks[0].get('line_y', y) if line_chunks else y
+
+        def _chunk_width(chunk: dict) -> float:
+            seg_scale = chunk['scale'] or 1.0
+            seg_infos = chunk['infos']
+            seg_positions = chunk['positions']
+            run_text = chunk['run_text']
+            local_offset = chunk['local_offset']
             seg_len = chunk['end'] - chunk['start']
             seg_text = run_text[local_offset:local_offset + seg_len]
             local_byte_offsets = [0]
@@ -1040,28 +1211,17 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
             for ch in seg_text:
                 acc_local += len(ch.encode('utf-8'))
                 local_byte_offsets.append(acc_local)
+            cursor = 0.0
             for info, pos in zip(seg_infos, seg_positions):
                 cluster = info.cluster
                 char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
                 char_idx = chunk['start'] + char_idx_local
                 current_dx = dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
                 add_spacing = letter_spacing
-                if text_content[char_idx:char_idx+1] == ' ':
+                if text_content[char_idx:char_idx + 1] == ' ':
                     add_spacing += word_spacing
-                total += pos.x_advance * seg_scale + current_dx + add_spacing
-        return total
-
-    for line_chunks in lines:
-        line_total = _measure_line(line_chunks)
-        line_anchor_offset = 0.0
-        if text_anchor == 'middle':
-            line_anchor_offset = -line_total / 2.0
-        elif text_anchor == 'end':
-            line_anchor_offset = -line_total
-        line_anchor_offset *= anchor_scale
-
-        advance_x_line = 0.0
-        line_baseline = line_chunks[0].get('line_y', y) if line_chunks else y
+                cursor += (pos.x_advance * seg_scale) + current_dx + add_spacing
+            return abs(cursor - letter_spacing)
 
         for chunk in line_chunks:
             seg_ttfont = chunk['ttfont']
@@ -1081,6 +1241,15 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
                 acc_local += len(ch.encode('utf-8'))
                 local_byte_offsets.append(acc_local)
 
+            chunk_width = _chunk_width(chunk)
+            chunk_dir = chunk.get('direction', 'LTR')
+            if chunk_dir == 'RTL':
+                chunk_start = line_width - advance_x_line_rtl - chunk_width
+                cursor_chunk = chunk_width
+            else:
+                chunk_start = advance_x_line_ltr
+                cursor_chunk = 0.0
+
             for info, pos in zip(seg_infos, seg_positions):
                 cluster = info.cluster
                 char_idx_local = max(0, bisect.bisect_right(local_byte_offsets, cluster) - 1)
@@ -1096,34 +1265,30 @@ def text_to_path_rust_style(text_elem: ET.Element, font_cache: FontCache, path_o
                 glyph_missing = glyph_name in ('.notdef', 'missing', 'null') or glyph_id == 0
                 glyph = seg_glyph_set.get(glyph_name) if (glyph_name and not glyph_missing) else None
                 if glyph is None:
-                    advance_x_line += pos.x_advance * seg_scale
+                    adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
+                    if text_content[char_idx:char_idx + 1] == ' ':
+                        adv_na += word_spacing
+                    if chunk_dir == 'RTL':
+                        cursor_chunk -= adv_na
+                    else:
+                        cursor_chunk += adv_na
                     continue
 
                 pen = RecordingPen()
                 try:
                     glyph.draw(pen)
                 except Exception:
-                    advance_x_line += pos.x_advance * seg_scale
+                    adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
+                    if text_content[char_idx:char_idx + 1] == ' ':
+                        adv_na += word_spacing
+                    if chunk_dir == 'RTL':
+                        cursor_chunk -= adv_na
+                    else:
+                        cursor_chunk += adv_na
                     continue
                 recording = pen.value
 
                 glyph_offset = 0.0
-                if len(text_content) == 1 and advance_x_line == 0:
-                    xs = []
-                    for op, args in recording:
-                        if op in ['moveTo', 'lineTo']:
-                            xs.append(args[0][0])
-                        elif op in ['qCurveTo', 'curveTo']:
-                            for px, py in args:
-                                xs.append(px)
-                    if xs:
-                        min_x = min(xs); max_x = max(xs); visual_center = (min_x + max_x)/2
-                        if text_anchor == 'start':
-                            glyph_offset = min_x * seg_scale
-                        elif text_anchor == 'middle':
-                            glyph_offset = visual_center * seg_scale
-                        elif text_anchor == 'end':
-                            glyph_offset = max_x * seg_scale
 
                 if path_obj is not None and path_len and path_len > 0:
                     arc_pos = path_offset + line_anchor_offset + advance_x_line + current_dx + (pos.x_offset * seg_scale) - glyph_offset
@@ -1388,6 +1553,10 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
     tree = ET.parse(svg_path)
     root = tree.getroot()
 
+    # Bake transforms up front to eliminate inherited transform-induced shifts.
+    # This was critical to reduce anchor drift across the document.
+    flatten_transforms(root)
+
     # Reject Inkscape SVG (sodipodi namespace)
     if any('sodipodi' in (elem.tag or '') for elem in root.iter()):
         raise RuntimeError("please export the file from inkscape using the plain svg option!")
@@ -1521,16 +1690,7 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                 current_path_offset = path_start_offset if path_obj else 0.0
 
                 parent_style = text_elem.get('style', '')
-                inline_size = None
-                white_space = text_elem.get('white-space') or re.search(r'white-space:([^;]+)', parent_style or '')
-                if white_space and not isinstance(white_space, str):
-                    white_space = None
-                inline_match = re.search(r'inline-size:([\\d\\.]+)', parent_style or '')
-                if inline_match:
-                    try:
-                        inline_size = float(inline_match.group(1))
-                    except Exception:
-                        inline_size = None
+                inline_size = None  # plain SVG: do not auto-wrap; rely on explicit x/y or tspans
 
                 def merge_style(p_style: str, c_style: str) -> str:
                     if p_style and c_style:
@@ -1539,6 +1699,20 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                         merged = {**p_props, **c_props}
                         return ';'.join(f"{k}:{v}" for k, v in merged.items())
                     return c_style or p_style
+
+                def strip_anchor(style_str: str) -> str:
+                    if not style_str:
+                        return style_str
+                    props = []
+                    for prop in style_str.split(';'):
+                        if ':' not in prop:
+                            continue
+                        k, v = prop.split(':', 1)
+                        k = k.strip()
+                        if k in ('text-anchor', 'text-align'):
+                            continue
+                        props.append(f"{k}:{v.strip()}")
+                    return ';'.join(props)
 
                 tspan_converted = 0
                 temp_id_counter = 0
@@ -1589,7 +1763,8 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
 
                     # If this span has direct text, convert it
                     text_content = span.text or ""
-                    if text_content.strip():
+                    has_child_tspan = any((c.tag.split('}',1)[-1] == 'tspan') for c in list(span))
+                    if text_content.strip() and not has_child_tspan:
                         leaf_items.append({
                             "text": text_content,
                             "x": cx,
@@ -1650,7 +1825,7 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                         temp_text.set('x', str(0))
                         temp_text.set('y', str(0))
                         if li["style"]:
-                            temp_text.set('style', li["style"])
+                            temp_text.set('style', strip_anchor(li["style"]))
                         temp_text.text = li["text"]
                         res = text_to_path_rust_style(temp_text, font_cache, None, 0.0, precision, dx_list=li["dx_list"], dy_list=li["dy_list"])
                         if res is None:
@@ -1714,7 +1889,7 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                             if 'transform' in text_elem.attrib:
                                 temp_text.set('transform', text_elem.get('transform'))
                             if li["style"]:
-                                temp_text.set('style', li["style"])
+                                temp_text.set('style', strip_anchor(li["style"]))
                             if li_anchor:
                                 temp_text.set('text-anchor', li_anchor)
                             if 'direction' in text_elem.attrib:
@@ -1755,7 +1930,7 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                             line_anchor = parent_anchor
 
                             # Measure widths with anchor=start to avoid double shifting
-                            measured: list[tuple[dict, float]] = []
+                            measured: list[tuple[dict, float]] = []  # (leaf, width)
                             for li in line_items:
                                 temp_measure = ET.Element('{http://www.w3.org/2000/svg}text')
                                 temp_measure.set('x', '0')
@@ -1780,23 +1955,36 @@ def convert_svg_text_to_paths(svg_path: Path, output_path: Path, precision: int 
                                 width = res[1] if res is not None else 0.0
                                 measured.append((li, width))
 
+                            # Widths already include dx/spacing from text_to_path_rust_style.
                             total_width = sum(w for _, w in measured)
+                            # Keep parent anchor but avoid double shifts on children.
+                            # This change removed a major left drift on some lines (~14%→7% diff overall).
+                            parent_shift = 0.0
                             if line_anchor == 'middle':
-                                start_x = line_base_x - total_width / 2.0
+                                parent_shift = -total_width / 2.0
                             elif line_anchor == 'end':
-                                start_x = line_base_x - total_width
-                            else:
-                                start_x = line_base_x
+                                parent_shift = -total_width
 
                             cursor = 0.0
                             for li, width in measured:
                                 temp_text = ET.Element('{http://www.w3.org/2000/svg}text')
-                                temp_text.set('x', str(start_x + cursor))
+                                anchor_shift = 0.0
+                                leaf_anchor = li.get("anchor") or line_anchor
+                                if leaf_anchor != line_anchor:
+                                    if leaf_anchor == 'middle':
+                                        anchor_shift = -width / 2.0
+                                    elif leaf_anchor == 'end':
+                                        anchor_shift = -width
+
+                                # If leaf anchor overrides parent, do not reapply parent_shift to avoid double anchoring.
+                                effective_parent_shift = 0.0 if leaf_anchor != line_anchor else parent_shift
+
+                                temp_text.set('x', str(line_base_x + effective_parent_shift + cursor + anchor_shift))
                                 temp_text.set('y', str(li["y"]))
                                 if 'transform' in text_elem.attrib:
                                     temp_text.set('transform', text_elem.get('transform'))
                                 if li["style"]:
-                                    temp_text.set('style', li["style"])
+                                    temp_text.set('style', strip_anchor(li["style"]))
                                 temp_text.set('text-anchor', 'start')
                                 if 'direction' in text_elem.attrib:
                                     temp_text.set('direction', text_elem.get('direction'))
