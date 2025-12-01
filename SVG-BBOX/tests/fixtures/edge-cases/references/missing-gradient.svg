@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- References gradient that doesn't exist -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect id="broken-gradient-rect" x="50" y="50" width="100" height="80" fill="url(#nonExistentGradient)" stroke="#000" stroke-width="2"/>
+</svg>

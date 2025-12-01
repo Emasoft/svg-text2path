@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <g id="outer-group" transform="translate(50, 50)">
+    <g id="middle-group" transform="rotate(15)">
+      <g id="inner-group" transform="scale(1.2)">
+        <rect id="deeply-nested-rect" x="50" y="50" width="80" height="60" fill="#1abc9c" />
+      </g>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Font family with special characters and spaces -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <text id="special-font-text" x="50" y="100" font-family="'Comic Sans MS', 'Arial Black', sans-serif" font-size="32" fill="#2c3e50">
+    Font with spaces and quotes
+  </text>
+</svg>

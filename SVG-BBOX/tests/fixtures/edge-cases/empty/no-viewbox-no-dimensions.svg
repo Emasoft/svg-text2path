@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SVG without viewBox, width, or height - library should auto-detect from content -->
+<svg xmlns="http://www.w3.org/2000/svg">
+  <rect id="test-rect" x="50" y="50" width="100" height="80" fill="#e74c3c"/>
+  <circle id="test-circle" cx="200" cy="150" r="30" fill="#3498db"/>
+</svg>

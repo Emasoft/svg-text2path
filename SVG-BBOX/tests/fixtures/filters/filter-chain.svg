@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <defs>
+    <filter id="complex-filter" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+      <feOffset in="blur" dx="5" dy="5" result="offsetBlur"/>
+      <feMorphology in="offsetBlur" operator="dilate" radius="2" result="dilate"/>
+      <feMerge>
+        <feMergeNode in="dilate"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <path id="complex-filtered-path" d="M 100,100 L 150,50 L 200,100 L 150,150 Z"
+        fill="#2ecc71" filter="url(#complex-filter)" />
+</svg>

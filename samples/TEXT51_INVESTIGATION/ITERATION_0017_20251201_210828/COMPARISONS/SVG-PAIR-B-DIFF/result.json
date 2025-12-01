@@ -1,0 +1,9 @@
+{
+  "svg1": "/Users/emanuelesabetta/Code/TEXT2PATH/text2path/samples/TEXT51_INVESTIGATION/ITERATION_0017_20251201_210828/SVG-PAIR-B/text51_original_patched.svg",
+  "svg2": "/Users/emanuelesabetta/Code/TEXT2PATH/text2path/samples/TEXT51_INVESTIGATION/ITERATION_0017_20251201_210828/SVG-PAIR-B/text51_converted_patched.svg",
+  "totalPixels": 3194970,
+  "differentPixels": 29598,
+  "diffPercentage": 0.93,
+  "threshold": 20,
+  "diffImage": "/Users/emanuelesabetta/Code/TEXT2PATH/text2path/samples/TEXT51_INVESTIGATION/ITERATION_0017_20251201_210828/COMPARISONS/SVG-PAIR-B-DIFF/diff.png"
+}
