@@ -17,7 +17,7 @@ uv pip install -r requirements.txt
 ## CLI tools
 
 - `t2p_convert input.svg [output.svg] [--precision N]` – convert text to paths; fails if any text remains or font is missing.
-- `t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--history-dir ./history] [--no-html]` – render+diff PNGs (Inkscape backend) and optional HTML summary.
+- `t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--history-dir ./history] [--no-html]` – Chrome-based compare via `sbb-comparer.cjs` (SVG-BBOX), produces diff PNG + HTML (opens Chrome by default; use `--no-html` to skip opening but still generate the report).
 - Diagnostics: `t2p_font_report`, `t2p_font_report_html`, `t2p_analyze_path`, `t2p_text_flow_test`.
 
 ## Current status (2025-11-21)

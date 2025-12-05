@@ -14,6 +14,7 @@ Examples:
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import tempfile
@@ -25,53 +26,131 @@ import numpy as np
 from PIL import Image
 
 
+def pixel_tol_to_threshold(pixel_tol: float) -> int:
+    """Map a 0-1 pixel tolerance to sbb-comparer integer threshold (1-20)."""
+    raw = int(round(pixel_tol * 256))
+    return max(1, min(20, raw))
+
+
+def run_sbb_comparer(
+    svg1: Path, svg2: Path, output_dir: Path, pixel_tol: float, no_html: bool
+) -> dict | None:
+    """Run sbb-comparer.cjs and return parsed JSON result."""
+    sbb_comparer_script = Path(__file__).parent.parent / "SVG-BBOX" / "sbb-comparer.cjs"
+    if not sbb_comparer_script.exists():
+        print(f"❌ sbb-comparer.cjs not found at {sbb_comparer_script}")
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    threshold = pixel_tol_to_threshold(pixel_tol)
+    diff_png = output_dir / f"diff_{svg1.stem}_vs_{svg2.stem}.png"
+    cmd = [
+        "node",
+        str(sbb_comparer_script),
+        str(svg1),
+        str(svg2),
+        "--out-diff",
+        str(diff_png),
+        "--threshold",
+        str(threshold),
+        "--scale",
+        "4",
+        "--json",
+    ]
+
+    print(f"Running sbb-comparer: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=output_dir, capture_output=True, text=True)
+
+    if result.stderr:
+        print(result.stderr)
+
+    payload = None
+    if result.stdout:
+        try:
+            payload = json.loads(result.stdout.strip())
+        except Exception:
+            print(result.stdout)
+
+    html_name = f"{svg1.stem}_vs_{svg2.stem}_comparison.html"
+    html_path = output_dir / html_name
+    if html_path.exists():
+        print(f"✓ HTML report: {html_path}")
+
+    if result.returncode != 0:
+        print(f"✗ sbb-comparer exited with {result.returncode}")
+        return payload
+
+    if payload:
+        diff_pct = payload.get("diffPercentage") or payload.get("difference") or payload.get("diff_percentage")
+        if diff_pct is not None:
+            print(f"✓ Diff: {float(diff_pct):.4f}% (threshold={threshold})")
+
+    print(f"✓ Diff image: {diff_png}")
+    return payload
+
+
 class SVGRenderer:
-    """Render SVG files to PNG using Inkscape"""
+    """Render SVG files to PNG using headless Chrome (puppeteer)."""
+
+    @staticmethod
+    def _parse_svg_dimensions(svg_path: Path) -> tuple[int, int] | None:
+        try:
+            root = ET.parse(svg_path).getroot()
+            def _num(val: str) -> float | None:
+                if val is None:
+                    return None
+                m = None
+                try:
+                    m = float(''.join([c for c in val if (c.isdigit() or c in '.+-')]))
+                except Exception:
+                    return None
+                return m
+            w_attr = root.get('width')
+            h_attr = root.get('height')
+            vb = root.get('viewBox')
+            if w_attr and h_attr:
+                w = _num(w_attr)
+                h = _num(h_attr)
+                if w and h:
+                    return int(round(w)), int(round(h))
+            if vb:
+                parts = vb.replace(',', ' ').split()
+                if len(parts) == 4:
+                    try:
+                        return int(float(parts[2])), int(float(parts[3]))
+                    except Exception:
+                        pass
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def render_svg_to_png(svg_path: Path, png_path: Path, dpi: int = 96) -> bool:
-        """
-        Render SVG to PNG using Inkscape
+        """Render SVG to PNG with Chrome via puppeteer script render_svg_chrome.js.
 
-        Args:
-            svg_path: Path to SVG file
-            png_path: Path to output PNG file
-            dpi: DPI for rendering (default: 96)
-
-        Returns:
-            True if rendering succeeded, False otherwise
+        Notes: dpi is ignored; Chrome renders at CSS pixel units matching SVG width/height.
         """
+        dim = SVGRenderer._parse_svg_dimensions(svg_path)
+        if not dim:
+            print(f"❌ Error: cannot determine SVG dimensions for {svg_path}", file=sys.stderr)
+            return False
+        width, height = dim
         try:
-            # Use Inkscape to render SVG to PNG
-            result = subprocess.run(
-                [
-                    "inkscape",
-                    "--export-type=png",
-                    f"--export-filename={png_path}",
-                    f"--export-dpi={dpi}",
-                    str(svg_path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
+            script = Path(__file__).parent / "render_svg_chrome.js"
+            cmd = ["node", str(script), str(svg_path), str(png_path), str(width), str(height)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
             if result.returncode != 0:
-                print(f"⚠️  Inkscape rendering failed: {result.stderr}", file=sys.stderr)
+                print(f"⚠️  Chrome render failed: {result.stderr}", file=sys.stderr)
                 return False
-
             return png_path.exists()
-
         except FileNotFoundError:
-            print("❌ Error: Inkscape not found. Please install Inkscape to render SVG files.", file=sys.stderr)
-            print("   macOS: brew install inkscape", file=sys.stderr)
-            print("   Linux: apt-get install inkscape", file=sys.stderr)
+            print("❌ Error: node or Chrome (puppeteer) not found. Install Node.js and run `npm install puppeteer`.", file=sys.stderr)
             return False
         except subprocess.TimeoutExpired:
             print(f"❌ Error: Rendering timeout for {svg_path}", file=sys.stderr)
             return False
         except Exception as e:
-            print(f"❌ Error rendering {svg_path}: {e}", file=sys.stderr)
+            print(f"❌ Error rendering {svg_path} with Chrome: {e}", file=sys.stderr)
             return False
 
 
@@ -302,29 +381,11 @@ def main():
         help="Directory to save diff images (default: /tmp/frame_comparer)",
     )
     parser.add_argument(
-        "--tolerance",
-        "-t",
-        type=float,
-        default=0.04,
-        help="Image-level tolerance as percentage (0.0-100.0, default: 0.04)",
-    )
-    parser.add_argument(
         "--pixel-tolerance",
         "-p",
         type=float,
-        default=1 / 256,
-        help="Pixel-level color tolerance (0.0-1.0, default: 1/256 ≈ 0.0039)",
-    )
-    parser.add_argument(
-        "--dpi",
-        type=int,
-        default=96,
-        help="DPI for SVG rendering (default: 96)",
-    )
-    parser.add_argument(
-        "--keep-pngs",
-        action="store_true",
-        help="Keep rendered PNG files (default: delete after comparison)",
+        default=20 / 256,
+        help="Pixel-level color tolerance (0.0-1.0, default: 20/256 ≈ 0.078)",
     )
     parser.add_argument(
         "--inkscape-svg",
@@ -338,11 +399,10 @@ def main():
         help="Directory to store HTML comparison history (default: ./history)",
     )
     parser.add_argument("--precision", type=int, default=None, help="Ignored (compatibility).")
-    parser.add_argument("--open-html", action="store_true", help="No-op (compatibility).")
     parser.add_argument(
         "--no-html",
         action="store_true",
-        help="Skip HTML summary generation/opening",
+        help="Generate HTML summary but do not auto-open it",
     )
 
     args = parser.parse_args()
@@ -367,169 +427,35 @@ def main():
     print(f"  Comparison: {args.svg2}")
     print()
 
-    # Render SVGs to PNGs
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
+    results = []
+    primary = run_sbb_comparer(
+        args.svg1,
+        args.svg2,
+        args.output_dir,
+        pixel_tol=args.pixel_tolerance,
+        no_html=args.no_html,
+    )
+    if primary:
+        results.append(primary)
 
-        renderer = SVGRenderer()
-        comparator = ImageComparator()
+    if args.inkscape_svg:
+        secondary_dir = args.output_dir / "inkscape_compare"
+        run_sbb_comparer(
+            args.svg1,
+            args.inkscape_svg,
+            secondary_dir,
+            pixel_tol=args.pixel_tolerance,
+            no_html=args.no_html,
+        )
 
-        def run_one(svg_ref: Path, svg_cmp: Path, label: str):
-            png1 = tmpdir_path / f"{svg_ref.stem}_{label}_ref.png"
-            png2 = tmpdir_path / f"{svg_cmp.stem}_{label}_cmp.png"
+    if not results:
+        return 1
 
-            print("Rendering SVGs to PNG...")
-            print(f"  Rendering {svg_ref.name}...")
-            if not renderer.render_svg_to_png(svg_ref, png1, dpi=args.dpi):
-                return None
-
-            print(f"  Rendering {svg_cmp.name}...")
-            if not renderer.render_svg_to_png(svg_cmp, png2, dpi=args.dpi):
-                return None
-
-            print("✓ Rendering complete\n")
-
-            if args.keep_pngs:
-                saved_png1 = args.output_dir / f"{svg_ref.stem}_{label}_rendered.png"
-                saved_png2 = args.output_dir / f"{svg_cmp.stem}_{label}_rendered.png"
-                Image.open(png1).save(saved_png1)
-                Image.open(png2).save(saved_png2)
-                print(f"✓ Saved rendered PNGs:")
-                print(f"  {saved_png1}")
-                print(f"  {saved_png2}\n")
-
-            print("Comparing images...")
-            is_identical, diff_info = comparator.compare_images_pixel_perfect(
-                png1, png2, tolerance=args.tolerance, pixel_tolerance=args.pixel_tolerance
-            )
-
-            print()
-            print(f"[{label}] {format_comparison_result(diff_info)}")
-            print()
-
-            if diff_info.get("diff_pixels", 0) > 0:
-                print("Generating diff visualizations...")
-                diff_img_path = args.output_dir / f"diff_{svg_ref.stem}_vs_{svg_cmp.stem}_{label}.png"
-                generate_diff_image(png1, png2, diff_img_path, pixel_tolerance=args.pixel_tolerance)
-                grayscale_diff_path = args.output_dir / f"diff_map_{svg_ref.stem}_vs_{svg_cmp.stem}_{label}.png"
-                generate_grayscale_diff_map(png1, png2, grayscale_diff_path)
-                print()
-
-            return {
-                "label": label,
-                "ref": svg_ref,
-                "cmp": svg_cmp,
-                "diff_info": diff_info,
-            }
-
-        results = []
-        primary = run_one(args.svg1, args.svg2, "ours")
-        if primary:
-            results.append(primary)
-        if args.inkscape_svg:
-            ink = run_one(args.svg1, args.inkscape_svg, "inkscape")
-            if ink:
-                results.append(ink)
-
-    # HTML summary
-    if results and not args.no_html:
-        args.history_dir.mkdir(parents=True, exist_ok=True)
-        counter_file = args.history_dir / "counter.txt"
-        try:
-            current = int(counter_file.read_text().strip())
-        except Exception:
-            current = 0
-        test_number = current + 1
-        counter_file.write_text(str(test_number))
-
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = args.history_dir / f"{test_number:04d}_{timestamp}"
-        session_dir.mkdir(parents=True, exist_ok=True)
-
-        def file_uri(p: Path) -> str:
-            return p.resolve().as_uri()
-
-        rows_html = []
-        divider = '<hr style="height:6px;background:#333;border:0;margin:20px 0;">'
-        for idx, res in enumerate(results):
-            diff_pct = res["diff_info"].get("diff_percentage", 0.0)
-            path_chars = total_path_chars(res["cmp"])
-            res_ref = svg_resolution(res["ref"])
-            res_cmp = svg_resolution(res["cmp"])
-            bar = (
-                f'<div style="background:#000;padding:10px 14px;'
-                f'font-weight:bold;font-size:24px; text-align:center;">'
-                f'<span style="color:#c67f00;">Diff:</span> '
-                f'<span style="color:#ffb200;">{diff_pct:.4f}%</span>'
-                f' &nbsp; <span style="color:#0e6b6b;">Path chars:</span> '
-                f'<span style="color:#16a3a3;">{path_chars}</span>'
-                f'</div>'
-            )
-            link_ref = f'<a href="{file_uri(res["ref"])}" style="font-size:20px;">{res["ref"].name}</a>'
-            link_cmp = f'<a href="{file_uri(res["cmp"])}" style="font-size:20px;">{res["cmp"].name}</a>'
-            # Colors per field
-            res_label_color = "#5a2c8c"
-            res_value_color = "#fffacd"
-            vb_label_color = "#206d8a"
-            vb_value_color = "#2aa7d6"
-            name_label_color = "#5c2c85"
-            name_value_color = "#8b46c4"
-            row = f"""
-            {bar}
-            <div class="row">
-              <div class="card">
-                <div class="label"><span style="color:{name_label_color};">ORIGINAL:</span> <span style="color:{name_value_color};">{link_ref}</span></div>
-                <object data="{file_uri(res['ref'])}" type="image/svg+xml"></object>
-                <div class="meta-line res"><span style="color:#ffd700;font-weight:bold;">RESOLUTION:</span> <span style="color:{res_value_color};">{res_ref.split(';')[0]}</span></div>
-                <div class="meta-line vb"><span style="color:{vb_label_color};font-weight:bold;">VIEWBOX:</span> <span style="color:{vb_value_color};">{res_ref.split(';')[-1].strip() if ';' in res_ref else res_ref}</span></div>
-              </div>
-              <div class="card">
-                <div class="label"><span style="color:{name_label_color};">{'OUR CONVERSION:' if res['label']=='ours' else 'INKSCAPE:'}</span> <span style="color:{name_value_color};">{link_cmp}</span></div>
-                <object data="{file_uri(res['cmp'])}" type="image/svg+xml"></object>
-                <div class="meta-line res"><span style="color:#ffd700;font-weight:bold;">RESOLUTION:</span> <span style="color:{res_value_color};">{res_cmp.split(';')[0]}</span></div>
-                <div class="meta-line vb"><span style="color:{vb_label_color};font-weight:bold;">VIEWBOX:</span> <span style="color:{vb_value_color};">{res_cmp.split(';')[-1].strip() if ';' in res_cmp else res_cmp}</span></div>
-              </div>
-            </div>
-            """
-            rows_html.append(row)
-            if idx == 0 and len(results) > 1:
-                rows_html.append(divider)
-
-        html_path = session_dir / "comparison.html"
-        html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>text2path comparison #{test_number}</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; margin: 20px; font-size:32px; }}
-    .header {{ font-size: 48px; font-weight: bold; margin-bottom: 6px; }}
-    .sub {{ color: #555; margin-bottom: 20px; font-size:28px; }}
-    .row {{ display: flex; gap: 20px; margin-bottom: 16px; align-items: flex-start; }}
-    .card {{ flex: 1; border: 2px solid #ccc; padding: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); background:#d9ffd9; }}
-    .label {{ font-weight: bold; margin-bottom: 8px; font-size:32px; color:#7a2ca0; text-transform: uppercase; }}
-    .meta {{ margin-top: 8px; color: #2a4a9a; font-size: 28px; }}
-    .meta-line {{ padding:6px 8px; margin-top:4px; font-size: 24px; }}
-    .meta-line.res {{ background:#933b5e; }}
-    .meta-line.vb {{ background:#e0f5ff; }}
-    object {{ width: 100%; height: 600px; border: 2px solid #eee; }}
-  </style>
-</head>
-<body>
-  <div class="header">Test #{test_number}</div>
-  <div class="sub">{timestamp}</div>
-  {''.join(rows_html)}
-</body>
-</html>"""
-
-        html_path.write_text(html)
-        try:
-            subprocess.run(["open", "-a", "Google Chrome", str(html_path)], check=False)
-        except Exception:
-            pass
-
-    return 0 if primary and primary["diff_info"].get("diff_pixels", 0) == 0 else 1
+    try:
+        diff_pix = results[0].get("differentPixels") or results[0].get("diff_pixels")
+        return 0 if diff_pix == 0 else 1
+    except Exception:
+        return 1
 
 
 if __name__ == "__main__":
