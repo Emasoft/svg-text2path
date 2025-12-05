@@ -1,41 +1,50 @@
-# Python
+# Generated logs
+logs/
+
+# Python cache
 __pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-*.egg
-*.whl
-.pytest_cache/
-.python-version
+*.pyc
 
-# Editor / tooling
-.vscode/
-.idea/
-.serena/
-.DS_Store
-
-# Virtual envs
-.venv/
-.env/
-ENV/
-
-# macOS noise
-.DS_Store
-
-# Node / front-end
+# Node/Pnpm
 node_modules/
 
-# Tooling outputs
-coverage.xml
-htmlcov/
-*.log
-*.tmp
-*.png
-*.jpg
+# Temporary outputs and comparisons
+samples/**/COMPARISONS/
+samples/**/SVG-PAIR-A-DIFF/
+samples/**/SVG-PAIR-B-DIFF/
+samples/**/diff.png
+samples/**/diff*.png
+samples/**/compare*.json
+samples/**/bbox*.json
+samples/**/tspans*.json
+samples/**/text*_compare.json
+samples/**/text*_orig*.json
+samples/**/text*_conv*.json
 
-# App-specific
-history/
-/tmp/
-comparisons.html
-diffs/
+# Investigation scratch folders
+samples/TEXT*_INVESTIGATION/**
+samples/TEXT?_INVESTIGATION/**
+samples/TEXT??_INVESTIGATION/**
+samples/TEXT??/**
+
+# Generated renders
+samples/**/*.png
+samples/**/*.jpg
+samples/**/*_converted*.svg
+samples/**/*_converted*.png
+samples/**/*_converted*.jpg
+samples/**/*_out*.svg
+samples/**/*_out*.png
+samples/**/*_out*.jpg
+samples/**/*_rust_paths*.svg
+samples/**/*_live*.svg
+samples/**/*_live*.png
+samples/**/*_live*.jpg
+
+# Local backups and scratch
+backups/
+*~
+.DS_Store
+
+# Ignore all samples output
+samples/
