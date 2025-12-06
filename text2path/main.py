@@ -738,6 +738,10 @@ class FontCache:
                 ):
                     continue
                 score = self._style_match_score(st, weight, style, stretch)
+                try:
+                    score += abs((weight_val or 0) - weight) / 1000.0
+                except Exception:
+                    pass
                 if best_score is None or score < best_score:
                     best_score = score
                     best_candidate = (path, st)
