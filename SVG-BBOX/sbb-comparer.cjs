@@ -251,6 +251,11 @@ function parseArgs(argv) {
     aspectRatioThreshold: result.flags['aspect-ratio-threshold'] || 0.001
   };
 
+  // Auto-lower scale when tolerance is high (speed win)
+  if (args.threshold >= 10 && args.scale > 2) {
+    args.scale = 2;
+  }
+
   // Validate threshold range (1-20)
   if (args.threshold < 1 || args.threshold > 20) {
     throw new Error('--threshold must be between 1 and 20');
@@ -649,6 +654,27 @@ async function calculateRenderParams(svg1Path, svg2Path, args, browser) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function renderSvgToPng(svgPath, outputPath, width, height, browser) {
+  // Cache directory for rendered rasters
+  const cacheDir = path.join(os.tmpdir(), 'sbb-comparer-cache');
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  } catch (e) { /* ignore */ }
+
+  // Build a content hash to avoid re-rendering identical inputs at same size
+  const svgBuffer = fs.readFileSync(svgPath);
+  const hash = crypto
+    .createHash('sha1')
+    .update(svgBuffer)
+    .update(String(width))
+    .update(String(height))
+    .digest('hex');
+  const cachedPng = path.join(cacheDir, `${hash}.png`);
+
+  if (fs.existsSync(cachedPng)) {
+    fs.copyFileSync(cachedPng, outputPath);
+    return;
+  }
+
   // SECURITY: Read and sanitize SVG
   const safePath = validateFilePath(svgPath, {
     requiredExtensions: ['.svg'],
@@ -705,6 +731,11 @@ async function renderSvgToPng(svgPath, outputPath, width, height, browser) {
     type: 'png',
     omitBackground: true
   });
+
+  // Save to cache for reuse
+  try {
+    fs.copyFileSync(safeOutputPath, cachedPng);
+  } catch (e) { /* ignore */ }
 
   await page.close();
 }
