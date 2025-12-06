@@ -24,6 +24,9 @@ import shutil
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- Logging setup --------------------------------------------------------
 LOG = logging.getLogger("t2p")
@@ -310,58 +313,204 @@ class FontCache:
         }
         return weight_map.get(weight)
 
-    _fc_cache: list[tuple[Path, list[str], list[str], str]] | None = None
+    _fc_cache: list[tuple[Path, list[str], list[str], str, int]] | None = None
+    _cache_file: Path | None = None
+    _cache_version: int = 2
 
-    def _load_fc_cache(self):
-        """Load fontconfig list once, caching tuples (path, families, styles, postscript)."""
-        if self._fc_cache is not None:
-            return
-        import subprocess
-        from shutil import which
+    def _font_dirs(self) -> list[Path]:
+        """Return platform-specific font directories."""
+        dirs: list[Path] = []
+        home = Path.home()
+        if sys.platform == "darwin":
+            dirs += [
+                Path("/System/Library/Fonts"),
+                Path("/System/Library/Fonts/Supplemental"),
+                Path("/Library/Fonts"),
+                home / "Library" / "Fonts",
+            ]
+        elif sys.platform.startswith("linux"):
+            dirs += [
+                Path("/usr/share/fonts"),
+                Path("/usr/local/share/fonts"),
+                home / ".fonts",
+                home / ".local" / "share" / "fonts",
+            ]
+        elif sys.platform.startswith("win"):
+            windir = os.environ.get("WINDIR", r"C:\\Windows")
+            dirs.append(Path(windir) / "Fonts")
+        return [d for d in dirs if d.exists()]
 
-        if not which("fc-list"):
-            self._fc_cache = []
-            return
+    def _cache_path(self) -> Path:
+        """Location for persistent font cache."""
+        if self._cache_file:
+            return self._cache_file
+        env = os.environ.get("T2P_FONT_CACHE")
+        if env:
+            self._cache_file = Path(env)
+        else:
+            base = Path.home() / ".cache" / "text2path"
+            base.mkdir(parents=True, exist_ok=True)
+            self._cache_file = base / "font_cache.json"
+        return self._cache_file
 
-        entries = []
+    def _load_persistent_cache(self) -> list[tuple[Path, list[str], list[str], str, int]] | None:
+        """Load cached font metadata if present and fresh."""
+        cache_path = self._cache_path()
+        if not cache_path.exists():
+            return None
         try:
-            result = subprocess.run(
-                ["fc-list", "--format=%{file}:%{family}:%{style}:%{postscriptname}\\n"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-            if result.returncode != 0:
-                self._fc_cache = []
-                return
-            for line in result.stdout.splitlines():
-                if ":" not in line:
-                    continue
-                parts = line.split(":")
-                if len(parts) < 3:
-                    continue
-                path_str, fam_str, style_str, ps_name = (
-                    parts[0],
-                    parts[1],
-                    parts[2],
-                    parts[3] if len(parts) > 3 else "",
-                )
-                p = Path(path_str.strip())
+            data = json.loads(cache_path.read_text())
+            if data.get("version") != self._cache_version:
+                return None
+            dirs_state = {
+                d: int(Path(d).stat().st_mtime) if Path(d).exists() else 0
+                for d in data.get("dirs", [])
+            }
+            for d in dirs_state:
+                if not Path(d).exists() or int(Path(d).stat().st_mtime) != dirs_state[d]:
+                    return None
+            entries: list[tuple[Path, list[str], list[str], str, int]] = []
+            for rec in data.get("fonts", []):
+                p = Path(rec["path"])
                 if not p.exists():
                     continue
-                fams = [f.strip().lower() for f in fam_str.split(",") if f.strip()]
-                styles = [s.strip().lower() for s in style_str.split(",") if s.strip()]
-                entries.append((p, fams, styles, ps_name.strip().lower()))
+                if int(p.stat().st_mtime) != rec.get("mtime"):
+                    continue
+                entries.append(
+                    (
+                        p,
+                        [f.lower() for f in rec.get("families", [])],
+                        [s.lower() for s in rec.get("styles", [])],
+                        rec.get("ps", "").lower(),
+                        int(rec.get("weight", 400)),
+                    )
+                )
+            if entries:
+                return entries
         except Exception:
-            entries = []
-        self._fc_cache = entries
+            return None
+        return None
+
+    def _spinner(self, message: str, stop_event: threading.Event):
+        """Simple console spinner."""
+        symbols = "|/-\\"
+        idx = 0
+        while not stop_event.is_set():
+            sys.stdout.write(f"\r{message} {symbols[idx % len(symbols)]}")
+            sys.stdout.flush()
+            idx += 1
+            time.sleep(0.12)
+        sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
+        sys.stdout.flush()
+
+    def _read_font_meta(self, path: Path) -> tuple[Path, list[str], list[str], str, int] | None:
+        try:
+            if path.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
+                return None
+            tt = TTFont(path, lazy=True, fontNumber=0 if path.suffix.lower() != ".ttc" else None)
+            names = tt["name"]
+            fams = []
+            for nid in (16, 1):
+                nm = names.getName(nid, 3, 1) or names.getName(nid, 1, 0)
+                if nm:
+                    fams.append(nm.toUnicode().strip().lower())
+            subfam = names.getName(2, 3, 1) or names.getName(2, 1, 0)
+            styles = []
+            if subfam:
+                styles.append(subfam.toUnicode().strip().lower())
+            ps = names.getName(6, 3, 1) or names.getName(6, 1, 0)
+            psname = ps.toUnicode().strip().lower() if ps else ""
+            weight = 400
+            try:
+                if "OS/2" in tt:
+                    weight = int(tt["OS/2"].usWeightClass)
+            except Exception:
+                pass
+            return (path, fams, styles, psname, weight)
+        except Exception:
+            return None
+
+    def _build_cache_entries(self) -> list[tuple[Path, list[str], list[str], str, int]]:
+        dirs = self._font_dirs()
+        font_files: set[Path] = set()
+        for d in dirs:
+            if not d.exists():
+                continue
+            for ext in ("*.ttf", "*.otf", "*.ttc", "*.otc", "*.woff2"):
+                font_files.update(d.rglob(ext))
+
+        # Deduplicate by resolved path
+        font_list = sorted({p.resolve() for p in font_files if p.exists()})
+
+        entries: list[tuple[Path, list[str], list[str], str, int]] = []
+        start = time.time()
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = {ex.submit(self._read_font_meta, p): p for p in font_list}
+            for fut in as_completed(futures):
+                meta = fut.result()
+                if meta:
+                    entries.append(meta)
+                if time.time() - start > 300:  # cap at ~5 minutes
+                    break
+        return entries
+
+    def _save_cache(self, entries: list[tuple[Path, list[str], list[str], str, int]]) -> None:
+        cache_path = self._cache_path()
+        dirs = [str(d) for d in self._font_dirs()]
+        payload = {
+            "version": self._cache_version,
+            "created_at": datetime.now().isoformat(),
+            "dirs": dirs,
+            "fonts": [
+                {
+                    "path": str(p),
+                    "mtime": int(p.stat().st_mtime),
+                    "families": fams,
+                    "styles": styles,
+                    "ps": ps,
+                    "weight": weight,
+                }
+                for (p, fams, styles, ps, weight) in entries
+            ],
+        }
+        try:
+            cache_path.write_text(json.dumps(payload))
+        except Exception as e:
+            print(f"⚠️  Could not write font cache: {e}")
+
+    def _load_fc_cache(self):
+        """Load persistent font cache (cross-platform). Falls back to scanning once."""
+        if self._fc_cache is not None:
+            return
+
+        cached = self._load_persistent_cache()
+        if cached is not None:
+            self._fc_cache = cached
+            return
+
+        # Build cache with spinner notice (first run)
+        msg = "The first time text2paths must build the font cache, and it can take up to 5 minutes. Please wait..."
+        stop_evt = threading.Event()
+        spinner_thread = threading.Thread(target=self._spinner, args=(msg, stop_evt))
+        spinner_thread.daemon = True
+        spinner_thread.start()
+        start = time.time()
+        try:
+            entries = self._build_cache_entries()
+            self._fc_cache = entries
+            self._save_cache(entries)
+        finally:
+            stop_evt.set()
+            spinner_thread.join(timeout=0.5)
+            elapsed = time.time() - start
+            print(f"Font cache ready in {elapsed:.1f}s ({len(self._fc_cache or [])} fonts indexed).")
 
     def fonts_with_coverage(self, codepoints: set[int], limit: int | None = 15) -> list[str]:
         """Return font family names for installed fonts that cover at least one of the given codepoints (capped)."""
         self._load_fc_cache()
         found: list[str] = []
         seen_fams: set[str] = set()
-        for path, fams, styles, ps in self._fc_cache:
+        for path, fams, styles, ps, _weight in self._fc_cache:
             if limit and len(found) >= limit:
                 break
             try:
@@ -571,7 +720,7 @@ class FontCache:
             except Exception:
                 return (path, 0)
 
-        for path, fams, styles, ps in self._fc_cache:
+        for path, fams, styles, ps, weight_val in self._fc_cache:
             fam_hit = (
                 any(
                     fam_norm == f or fam_norm.lstrip(".") == f.lstrip(".") for f in fams
