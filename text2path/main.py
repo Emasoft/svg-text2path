@@ -1420,13 +1420,64 @@ def text_to_path_rust_style(
     )
 
     # 3. Load font using CSS properties (fontconfig matches like browsers do)
-    font_data = font_cache.get_font(
-        font_family,
-        weight=font_weight,
-        style=font_style,
-        stretch=font_stretch,
-        inkscape_spec=inkscape_spec,
-    )
+    norm_fam = font_family.strip().lower()
+    symbol_aliases = {"webdings", "wingdings", "marlett"}
+    newyork_aliases = {".new york", "new york"}
+    phosphate_aliases = {"phosphate"}
+
+    font_data = None
+
+    if norm_fam in symbol_aliases:
+        # Prefer platform symbol fonts
+        for fam in (
+            "Apple Symbols",
+            "Segoe UI Symbol",
+            "Symbola",
+            "Arial Unicode MS",
+        ):
+            font_data = font_cache.get_font(
+                fam,
+                weight=font_weight,
+                style="normal",
+                stretch=font_stretch,
+                inkscape_spec=None,
+                strict_family=False,
+            )
+            if font_data:
+                break
+    elif norm_fam in newyork_aliases:
+        for fam in ("New York", "Times New Roman"):
+            font_data = font_cache.get_font(
+                fam,
+                weight=font_weight,
+                style=font_style,
+                stretch=font_stretch,
+                inkscape_spec=None,
+                strict_family=False,
+            )
+            if font_data:
+                break
+    elif norm_fam in phosphate_aliases:
+        for fam in ("Phosphate", "Impact", "Arial Black"):
+            font_data = font_cache.get_font(
+                fam,
+                weight=font_weight,
+                style=font_style,
+                stretch=font_stretch,
+                inkscape_spec=None,
+                strict_family=False,
+            )
+            if font_data:
+                break
+
+    if not font_data:
+        font_data = font_cache.get_font(
+            font_family,
+            weight=font_weight,
+            style=font_style,
+            stretch=font_stretch,
+            inkscape_spec=inkscape_spec,
+        )
     if not font_data:
         raise MissingFontError(
             font_family,

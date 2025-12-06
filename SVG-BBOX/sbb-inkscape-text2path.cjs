@@ -396,23 +396,24 @@ function readBatchFile(batchFilePath) {
     throw new ValidationError(`Batch file is empty: ${safeBatchPath}`);
   }
 
-  // SECURITY: Validate each file path in batch for shell metacharacters
-  // This prevents command injection attacks via malicious batch file contents
+  const pairs = [];
+
   lines.forEach((line, index) => {
-    try {
-      // Check for shell metacharacters without full path validation
-      // (full validation happens later during processing)
-      if (SHELL_METACHARACTERS.test(line)) {
-        throw new Error('contains shell metacharacters');
-      }
-    } catch (err) {
+    if (SHELL_METACHARACTERS.test(line)) {
       throw new ValidationError(
-        `Invalid file path at line ${index + 1} in batch file: ${err.message}`
+        `Invalid file path at line ${index + 1} in batch file: contains shell metacharacters`
       );
+    }
+    // Allow tab or space separated "input output"
+    const parts = line.split(/\s+/);
+    if (parts.length >= 2) {
+      pairs.push({ input: parts[0], output: parts[1] });
+    } else {
+      pairs.push({ input: parts[0], output: null });
     }
   });
 
-  return lines;
+  return pairs;
 }
 
 /**
@@ -530,10 +531,12 @@ async function main() {
     }
 
     for (let i = 0; i < inputFiles.length; i++) {
-      const inputFile = inputFiles[i];
+      const { input: inputFile, output: explicitOutput } = inputFiles[i];
       const baseName = path.basename(inputFile, path.extname(inputFile));
       const dirName = path.dirname(inputFile);
-      const outputFile = path.join(dirName, `${baseName}-paths.svg`);
+      const outputFile = explicitOutput
+        ? explicitOutput
+        : path.join(dirName, `${baseName}-paths.svg`);
 
       try {
         if (!args.json) {
