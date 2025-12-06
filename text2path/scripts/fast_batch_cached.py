@@ -85,6 +85,11 @@ def main():
 
     svgs = [svg for svg in sorted(samples.glob("text*.svg")) if svg.name not in args.skip]
 
+    # Always prewarm the font cache; if the on-disk cache was deleted, this rebuilds it once.
+    fc = FontCache()
+    count = fc.prewarm()
+    print(f"Font cache ready ({count} fonts indexed)")
+
     pairs: list[tuple[str, str]] = []
     if args.jobs and args.jobs > 1:
         with ProcessPoolExecutor(max_workers=args.jobs) as ex:
