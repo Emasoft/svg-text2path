@@ -317,6 +317,7 @@ class FontCache:
     _cache_file: Path | None = None
     _cache_version: int = 3
     _prebaked: dict[str, list[dict]] | None = None
+    _cache_partial: bool = False
 
     def _font_dirs(self) -> list[Path]:
         """Return platform-specific font directories."""
@@ -355,7 +356,7 @@ class FontCache:
         return self._cache_file
 
     def _load_persistent_cache(self) -> tuple[
-        list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]]
+        list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]], bool
     ] | None:
         """Load cached font metadata if present and fresh."""
         cache_path = self._cache_path()
@@ -389,8 +390,9 @@ class FontCache:
                     )
                 )
             prebaked = data.get("prebaked", {})
+            partial = bool(data.get("partial", False))
             if entries:
-                return (entries, prebaked)
+                return (entries, prebaked, partial)
         except Exception:
             return None
         return None
@@ -407,7 +409,7 @@ class FontCache:
         sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
         sys.stdout.flush()
 
-    def _read_font_meta(self, path: Path) -> tuple[Path, list[str], list[str], str, int, dict] | None:
+    def _read_font_meta(self, path: Path, need_flags: bool) -> tuple[Path, list[str], list[str], str, int, dict] | None:
         try:
             if path.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
                 return None
@@ -430,22 +432,24 @@ class FontCache:
                     weight = int(tt["OS/2"].usWeightClass)
             except Exception:
                 pass
-            # Light coverage flags (avoid loading later): basic Latin, Latin-1, CJK, RTL
-            flags = {"latin": False, "latin1": False, "cjk": False, "rtl": False}
-            try:
-                cmap = tt.getBestCmap() or {}
-                codes = set(cmap.keys())
-                flags["latin"] = any(0x0041 <= c <= 0x007A for c in codes)
-                flags["latin1"] = any(0x00A0 <= c <= 0x00FF for c in codes)
-                flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(0x0590 <= c <= 0x05FF for c in codes)
-                flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(0x3040 <= c <= 0x30FF for c in codes)
-            except Exception:
-                pass
+            flags = {}
+            if need_flags:
+                # Light coverage flags (avoid loading later): basic Latin, Latin-1, CJK, RTL
+                flags = {"latin": False, "latin1": False, "cjk": False, "rtl": False}
+                try:
+                    cmap = tt.getBestCmap() or {}
+                    codes = set(cmap.keys())
+                    flags["latin"] = any(0x0041 <= c <= 0x007A for c in codes)
+                    flags["latin1"] = any(0x00A0 <= c <= 0x00FF for c in codes)
+                    flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(0x0590 <= c <= 0x05FF for c in codes)
+                    flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(0x3040 <= c <= 0x30FF for c in codes)
+                except Exception:
+                    pass
             return (path, fams, styles, psname, weight, flags)
         except Exception:
             return None
 
-    def _build_cache_entries(self) -> tuple[list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]]]:
+    def _build_cache_entries(self) -> tuple[list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]], bool]:
         dirs = self._font_dirs()
         font_files: set[Path] = set()
         for d in dirs:
@@ -478,33 +482,39 @@ class FontCache:
             "symbol",
         }
         start = time.time()
+        budget_seconds = 300  # hard cap ~5 minutes
+        partial = False
         with ThreadPoolExecutor(max_workers=4) as ex:
-            futures = {ex.submit(self._read_font_meta, p): p for p in font_list}
+            futures = {ex.submit(self._read_font_meta, p, False): p for p in font_list}
             for fut in as_completed(futures):
                 meta = fut.result()
                 if meta:
-                    path, fams, styles, ps, weight, flags = meta
+                    path, fams, styles, ps, weight, _flags = meta
                     entries.append((path, fams, styles, ps, weight))
                     fam_set = set(fams) | ({ps} if ps else set())
                     if fam_set & prebake_fams:
                         prebake_key = list(fam_set & prebake_fams)[0]
+                        # For prebake candidates, compute flags lazily now (may need to reopen)
+                        flags = {}
+                        try:
+                            flags_meta = self._read_font_meta(path, True)
+                            if flags_meta:
+                                flags = flags_meta[-1]
+                        except Exception:
+                            pass
                         prebaked.setdefault(prebake_key, []).append(
-                            {
-                                "path": str(path),
-                                "styles": styles,
-                                "ps": ps,
-                                "weight": weight,
-                                "flags": flags,
-                            }
+                            {"path": str(path), "styles": styles, "ps": ps, "weight": weight, "flags": flags}
                         )
-                if time.time() - start > 300:  # cap at ~5 minutes
+                if time.time() - start > budget_seconds:
+                    partial = True
                     break
-        return entries, prebaked
+        return entries, prebaked, partial
 
     def _save_cache(
         self,
         entries: list[tuple[Path, list[str], list[str], str, int]],
         prebaked: dict[str, list[dict]],
+        partial: bool,
     ) -> None:
         cache_path = self._cache_path()
         dirs = [str(d) for d in self._font_dirs()]
@@ -524,6 +534,7 @@ class FontCache:
                 for (p, fams, styles, ps, weight) in entries
             ],
             "prebaked": prebaked,
+            "partial": partial,
         }
         try:
             cache_path.write_text(json.dumps(payload))
@@ -537,7 +548,7 @@ class FontCache:
 
         cached = self._load_persistent_cache()
         if cached is not None:
-            self._fc_cache, self._prebaked = cached
+            self._fc_cache, self._prebaked, self._cache_partial = cached
             return
 
         # Build cache with spinner notice (first run)
@@ -548,10 +559,11 @@ class FontCache:
         spinner_thread.start()
         start = time.time()
         try:
-            entries, prebaked = self._build_cache_entries()
+            entries, prebaked, partial = self._build_cache_entries()
             self._fc_cache = entries
             self._prebaked = prebaked
-            self._save_cache(entries, prebaked)
+            self._cache_partial = partial
+            self._save_cache(entries, prebaked, partial)
         finally:
             stop_evt.set()
             spinner_thread.join(timeout=0.5)
@@ -570,6 +582,10 @@ class FontCache:
             return []
         key = family.strip().lower()
         return self._prebaked.get(key, [])
+
+    def cache_is_partial(self) -> bool:
+        self._load_fc_cache()
+        return bool(self._cache_partial)
 
     def fonts_with_coverage(self, codepoints: set[int], limit: int | None = 15) -> list[str]:
         """Return font family names for installed fonts that cover at least one of the given codepoints (capped)."""

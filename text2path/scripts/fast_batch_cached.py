@@ -88,7 +88,8 @@ def main():
     # Always prewarm the font cache; if the on-disk cache was deleted, this rebuilds it once.
     fc = FontCache()
     count = fc.prewarm()
-    print(f"Font cache ready ({count} fonts indexed)")
+    note = " (partial scan)" if fc.cache_is_partial() else ""
+    print(f"Font cache ready ({count} fonts indexed){note}")
 
     pairs: list[tuple[str, str]] = []
     if args.jobs and args.jobs > 1:
