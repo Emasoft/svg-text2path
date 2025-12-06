@@ -673,6 +673,15 @@ async function renderSvgToPng(svgPath, outputPath, width, height, browser) {
   const cachedPng = path.join(cacheDir, `${hash}.png`);
 
   if (fs.existsSync(cachedPng)) {
+    // Invalidate cache if SVG changed after PNG
+    try {
+      const svgMtime = fs.statSync(svgPath).mtimeMs;
+      const pngMtime = fs.statSync(cachedPng).mtimeMs;
+      if (pngMtime >= svgMtime) {
+        fs.copyFileSync(cachedPng, outputPath);
+        return;
+      }
+    } catch (e) { /* fall through to render */ }
     fs.copyFileSync(cachedPng, outputPath);
     return;
   }
