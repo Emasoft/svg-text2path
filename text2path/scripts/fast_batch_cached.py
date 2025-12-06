@@ -147,6 +147,10 @@ def main():
     summary = json.loads(summary_path.read_text())
     failures = 0
     for r in summary.get("results", []):
+        if r.get("error"):
+            print(f"{Path(r.get('svg1','')).name},error,FAIL ({r.get('error')})")
+            failures += 1
+            continue
         diff = float(
             r.get("diffPercent")
             or r.get("diffPercentage")
