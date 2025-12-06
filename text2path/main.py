@@ -2128,14 +2128,13 @@ def text_to_path_rust_style(
                 font_key = "fallback"
             elif cp in cmap and cmap.get(cp, 0) != 0:
                 font_key = "primary"
-                elif (
-                    fallback_cmap and cp in fallback_cmap and fallback_cmap.get(cp, 0) != 0
-                ):
-                    if 0x0600 <= cp <= 0x06FF:
-                        if fallback_ttfont:
-                            dbg(
-                                f"DEBUG ARABIC: cp={cp} found in fallback {fallback_ttfont.reader.file.name}"
-                            )
+            elif (
+                fallback_cmap and cp in fallback_cmap and fallback_cmap.get(cp, 0) != 0
+            ):
+                if 0x0600 <= cp <= 0x06FF and fallback_ttfont:
+                    dbg(
+                        f"DEBUG ARABIC: cp={cp} found in fallback {fallback_ttfont.reader.file.name}"
+                    )
                 font_key = "fallback"
             elif cjk_cmap and cp in cjk_cmap and cjk_cmap.get(cp, 0) != 0:
                 # Try CJK for non-CJK chars if missing elsewhere
@@ -2364,9 +2363,13 @@ def text_to_path_rust_style(
                 last_letter = letter_spacing
             width += abs(cursor)
     
-            if "No javascript" in run_text:
-                print(
-                    f"DEBUG MEASURE: run_text='{run_text}' glyph_count={len(seg_infos)} cursor={cursor} width_so_far={width}"
+            if DEBUG_ENABLED and "No javascript" in run_text:
+                dbg(
+                    "DEBUG MEASURE: run_text='%s' glyph_count=%s cursor=%s width_so_far=%s",
+                    run_text,
+                    len(seg_infos),
+                    cursor,
+                    width,
                 )
     
         width -= last_letter
@@ -2525,7 +2528,7 @@ def text_to_path_rust_style(
                 except Exception:
                     glyph_name = None
     
-                if any(
+                if DEBUG_ENABLED and any(
                     x in text_content for x in ["Λοπ", "No javascript", "lkœtrëå", "兛"]
                 ):
                     has_path = False
@@ -2553,10 +2556,14 @@ def text_to_path_rust_style(
                         seg_glyph_set[glyph_name].draw(pen)
                         # Simple check of first move
                         if pen.value:
-                            print(
-                                f"    DEBUG_PATH: {pen.value} (Scale: {seg_scale}, Offset: {current_dx}, {0})"
+                            dbg(
+                                "    DEBUG_PATH: %s (Scale: %s, Offset: %s, %s)",
+                                pen.value,
+                                seg_scale,
+                                current_dx,
+                                0,
                             )
-    
+
                     sys.stdout.flush()
     
                 # If glyph_name is None or not in seg_glyph_set, it's truly missing.
@@ -3184,7 +3191,10 @@ def get_visual_bboxes(svg_path):
 
 
 def convert_svg_text_to_paths(
-    svg_path: Path, output_path: Path, precision: int = 28
+    svg_path: Path,
+    output_path: Path,
+    precision: int = 28,
+    font_cache: FontCache | None = None,
 ) -> None:
     """Convert all text elements in SVG to paths."""
     print(f"Converting text to paths (Rust-style) in: {svg_path}")
@@ -3207,8 +3217,8 @@ def convert_svg_text_to_paths(
             "please export the file from inkscape using the plain svg option!"
         )
 
-    # 2. Create font cache
-    font_cache = FontCache()
+    # 2. Create or reuse font cache
+    font_cache = font_cache or FontCache()
 
     # 2b. Collect path definitions for textPath
     path_map = {}  # id -> svg.path.Path
