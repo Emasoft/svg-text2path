@@ -43,8 +43,8 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def run(cmd, stdout=None):
-    subprocess.run(cmd, check=True, stdout=stdout)
+def run(cmd, timeout=None, stdout=None):
+    subprocess.run(cmd, check=True, stdout=stdout, timeout=timeout)
 
 
 def main():
@@ -73,6 +73,12 @@ def main():
         "--force",
         action="store_true",
         help="Recompute conversions even if cached output is newer than input.",
+    )
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        help="Per-command timeout in seconds (applies to comparer). Default: 60.",
     )
     args = p.parse_args()
 
@@ -142,7 +148,7 @@ def main():
         "--json",
     ]
     with summary_path.open("w") as f:
-        run(cmd, stdout=f)
+        run(cmd, stdout=f, timeout=args.timeout)
 
     summary = json.loads(summary_path.read_text())
     failures = 0
