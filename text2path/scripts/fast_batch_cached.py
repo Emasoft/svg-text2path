@@ -52,7 +52,7 @@ def main():
     p.add_argument("--out-dir", default="tmp/fast_cached", help="Output directory")
     p.add_argument("--threshold", type=int, default=20)
     p.add_argument("--scale", type=float, default=1.0)
-    p.add_argument("--resolution", default="nominal")
+    p.add_argument("--resolution", default="4x")
     p.add_argument("--skip", nargs="*", default=["text4.svg"], help="Files to skip")
     p.add_argument("--precision", type=int, default=3, help="Path precision for converter")
     p.add_argument(
@@ -77,8 +77,8 @@ def main():
     p.add_argument(
         "--timeout",
         type=int,
-        default=60,
-        help="Per-command timeout in seconds (applies to comparer). Default: 60.",
+        default=180,
+        help="Per-command timeout in seconds (applies to comparer). Default: 180.",
     )
     args = p.parse_args()
 

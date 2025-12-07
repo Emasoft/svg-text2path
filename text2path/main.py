@@ -1428,14 +1428,21 @@ def text_to_path_rust_style(
     font_data = None
 
     if norm_fam in symbol_aliases:
-        # Prefer platform symbol fonts
-        for fam in (
-            "Apple Symbols",
+        # Prefer platform symbol fonts; score by coverage of ASCII + dingbats
+        symbol_candidates = [
             "Segoe UI Symbol",
+            "Apple Symbols",
             "Symbola",
             "Arial Unicode MS",
-        ):
-            font_data = font_cache.get_font(
+            "Noto Sans Symbols",
+            "Noto Sans Symbols2",
+        ]
+        best_sym = None
+        best_score = -1
+        needed = set(ord(ch) for ch in text_content)
+        dingbat_range = lambda cp: 0x2600 <= cp <= 0x27FF
+        for fam in symbol_candidates:
+            cand = font_cache.get_font(
                 fam,
                 weight=font_weight,
                 style="normal",
@@ -1443,8 +1450,17 @@ def text_to_path_rust_style(
                 inkscape_spec=None,
                 strict_family=False,
             )
-            if font_data:
-                break
+            if not cand:
+                continue
+            tt = cand[0]
+            cmap_c = tt.getBestCmap() or {}
+            cover = sum(1 for cp in needed if cp in cmap_c and cmap_c[cp] != 0)
+            cover_ding = sum(1 for cp in needed if dingbat_range(cp) and cp in cmap_c and cmap_c[cp] != 0)
+            score = cover + cover_ding * 2
+            if score > best_score:
+                best_score = score
+                best_sym = cand
+        font_data = best_sym
     elif norm_fam in newyork_aliases:
         for fam in ("New York", "Times New Roman"):
             font_data = font_cache.get_font(
@@ -1507,27 +1523,28 @@ def text_to_path_rust_style(
 
     if not cmap:
         cmap = {}
-    missing_chars = [
-        ch for ch in text_content if ord(ch) not in cmap or cmap.get(ord(ch), 0) == 0
-    ]
-    # Treat glyphs with no outline as missing too (cmap may map but glyph is empty)
     try:
         glyph_set_primary = ttfont.getGlyphSet()
     except Exception:
         glyph_set_primary = None
-    if glyph_set_primary:
-        for ch in text_content:
-            cp = ord(ch)
-            if cp in cmap and cmap.get(cp, 0) != 0 and ch not in missing_chars:
-                try:
-                    gid = cmap.get(cp)
-                    glyph_name = ttfont.getGlyphName(gid)
-                    pen_check = DecomposingRecordingPen(glyph_set_primary)
-                    glyph_set_primary[glyph_name].draw(pen_check)
-                    if not pen_check.value:
-                        missing_chars.append(ch)
-                except Exception:
-                    missing_chars.append(ch)
+
+    def _has_glyph(tt, glyph_set, codepoint):
+        if codepoint not in cmap or cmap.get(codepoint, 0) == 0:
+            return False
+        try:
+            gid = cmap.get(codepoint)
+            name = gid if isinstance(gid, str) else tt.getGlyphName(gid)
+            if not glyph_set or name not in glyph_set:
+                return False
+            pen = DecomposingRecordingPen(glyph_set)
+            glyph_set[name].draw(pen)
+            return bool(pen.value)
+        except Exception:
+            return False
+
+    missing_chars = [
+        ch for ch in text_content if not _has_glyph(ttfont, glyph_set_primary, ord(ch))
+    ]
     fallback_ttfont = None
     fallback_cmap = None
     fallback_glyph_set = None
@@ -1793,6 +1810,8 @@ def text_to_path_rust_style(
         return candidates
     
     if missing_chars:
+        if text_elem.get("id") == "text8":
+            print(f"DEBUG missing_chars for {text_elem.get('id')}: {missing_chars}")
         # Script-based fallback selection (single fallback per run)
         fb_weight = int(max(100, min(900, font_weight)))
     
@@ -2154,6 +2173,7 @@ def text_to_path_rust_style(
     
     # If all chars are missing in the primary and a fallback covers everything, promote it to primary
     if missing_chars and len(missing_chars) == len(text_content):
+        print(f"DEBUG promote fallback id={text_elem.get('id')} missing={missing_chars}")
         if cjk_ttfont and cjk_cmap and all(ord(ch) in cjk_cmap for ch in text_content):
             print("    → Switching primary to CJK fallback for full coverage")
             ttfont = cjk_ttfont
