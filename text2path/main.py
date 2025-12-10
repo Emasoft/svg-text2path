@@ -1901,6 +1901,31 @@ def text_to_path_rust_style(
                 fb_names.append(fam)
         # ensure fb_names are plain strings
         fb_names = [f[0] if isinstance(f, tuple) else f for f in fb_names]
+        # Heuristic: when using SF Arabic, prefer SF Compact Rounded as fallback for ASCII/punctuation
+        if "sf arabic" in font_family.lower():
+            preferred_sf_fb = [
+                "SF Compact Rounded",
+                "SFCompactRounded",
+                "SF Compact",
+                ".SF Compact Rounded",
+            ]
+            for fam in reversed(preferred_sf_fb):
+                if fam not in fb_names:
+                    fb_names.insert(0, fam)
+            # If all missing chars are ASCII, force the preferred SF fallback to be the primary candidate
+            if all(ord(ch) < 256 for ch in missing_chars):
+                for fam in preferred_sf_fb:
+                    cand = font_cache.get_font(
+                        fam,
+                        weight=font_weight,
+                        style=font_style,
+                        stretch="normal",
+                        inkscape_spec=None,
+                        strict_family=False,
+                    )
+                    if cand:
+                        best_fb = (fam, font_weight)
+                        break
         # Paths cannot be built from color-emoji bitmap fonts; drop any emoji families
         fb_names = [f for f in fb_names if "emoji" not in f.lower()]
         # Chrome detection: if we get a hash match, trust it as the primary fallback
@@ -2159,6 +2184,15 @@ def text_to_path_rust_style(
             fallback_units_per_em = fallback_ttfont["head"].unitsPerEm
             fallback_scale = font_size / fallback_units_per_em
             fallback_glyph_set = fallback_ttfont.getGlyphSet()
+            # Remove chars now covered by the chosen fallback to avoid later promotion
+            if fallback_cmap:
+                missing_chars = [
+                    ch
+                    for ch in missing_chars
+                    if ord(ch) not in fallback_cmap
+                    or fallback_cmap.get(ord(ch), 0) == 0
+                ]
+                missing_set = set(missing_chars)
         else:
             fallback_ttfont = None
         if missing_chars and (not fallback_font or best_cover <= 0):
@@ -2874,34 +2908,59 @@ def text_to_path_rust_style(
     
                 # If glyph_name is None or not in seg_glyph_set, it's truly missing.
                 # If glyph_name is '.notdef' or glyph_id is 0, we check if it has a path.
-                if not glyph_name or glyph_name not in seg_glyph_set:
-                    # Truly missing glyph or glyph name not found in font's glyph set
-                    adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
-                    if text_content[char_idx : char_idx + 1] == " ":
-                        adv_na += word_spacing
-                    if chunk_dir == "RTL":
-                        cursor_chunk -= adv_na
-                    else:
-                        cursor_chunk += adv_na
-                    continue
-    
                 glyph_is_notdef_or_zero = glyph_name == ".notdef" or glyph_id == 0
+
+                glyph = seg_glyph_set.get(glyph_name) if glyph_name else None
+
+                # If glyph missing, try shaping/drawing with fallback font
+                if glyph is None or glyph_is_notdef_or_zero:
+                    drew_fallback = False
+                    if (
+                        fallback_hb_font
+                        and fallback_glyph_set
+                        and fallback_ttfont
+                        and fallback_cmap
+                        and ord(text_content[char_idx]) in fallback_cmap
+                        and fallback_cmap.get(ord(text_content[char_idx]), 0) != 0
+                    ):
+                        try:
+                            fb_buf = hb.Buffer()
+                            fb_buf.add_str(text_content[char_idx])
+                            fb_buf.direction = "rtl" if direction == "RTL" else "ltr"
+                            fb_buf.guess_segment_properties()
+                            hb.shape(
+                                fallback_hb_font,
+                                fb_buf,
+                                features=_hb_features(len(text_content[char_idx].encode('utf-8'))),
+                            )
+                            fb_info = fb_buf.glyph_infos[0]
+                            fb_pos = fb_buf.glyph_positions[0]
+                            fb_gid = fb_info.codepoint
+                            fb_name = fallback_ttfont.getGlyphName(fb_gid)
+                            fb_glyph = fallback_glyph_set.get(fb_name)
+                            if fb_glyph:
+                                fb_pen = DecomposingRecordingPen(fallback_glyph_set)
+                                fb_glyph.draw(fb_pen)
+                                recording = fb_pen.value
+                                seg_scale = fallback_scale  # use fallback scale for this glyph
+                                pos = fb_pos
+                                glyph_name = fb_name
+                                glyph_is_notdef_or_zero = False
+                                drew_fallback = True
+                        except Exception:
+                            drew_fallback = False
+
+                    if not drew_fallback:
+                        adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
+                        if text_content[char_idx : char_idx + 1] == " ":
+                            adv_na += word_spacing
+                        if chunk_dir == "RTL":
+                            cursor_chunk -= adv_na
+                        else:
+                            cursor_chunk += adv_na
+                        continue
     
-                glyph = seg_glyph_set.get(glyph_name)
-    
-                if glyph is None:
-                    # This should ideally not happen if glyph_name was in seg_glyph_set,
-                    # but as a safeguard, treat as missing.
-                    adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
-                    if text_content[char_idx : char_idx + 1] == " ":
-                        adv_na += word_spacing
-                    if chunk_dir == "RTL":
-                        cursor_chunk -= adv_na
-                    else:
-                        cursor_chunk += adv_na
-                    continue
-    
-                pen = DecomposingRecordingPen(seg_glyph_set)
+                pen = DecomposingRecordingPen(seg_glyph_set if glyph_name in (seg_glyph_set or {}) else fallback_glyph_set)
                 try:
                     glyph.draw(pen)
                 except Exception as e:
