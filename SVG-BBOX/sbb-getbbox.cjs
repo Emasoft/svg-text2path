@@ -722,15 +722,21 @@ function printResults(allResults) {
  * @param {string} outputPath - Output JSON file path
  */
 function saveJSON(allResults, outputPath) {
-  // SECURITY: Validate output path
-  const safePath = validateOutputPath(outputPath, {
-    requiredExtensions: ['.json']
-  });
-
   const json = {};
   for (const item of allResults) {
     json[item.path] = item.results;
   }
+
+  // Support stdout for scripting convenience
+  if (outputPath === '-' || outputPath === '/dev/stdout') {
+    console.log(JSON.stringify(json, null, 2));
+    return;
+  }
+
+  // SECURITY: Validate output path
+  const safePath = validateOutputPath(outputPath, {
+    requiredExtensions: ['.json']
+  });
 
   // SECURITY: Use writeFileSafe (creates directory if needed)
   writeFileSafe(safePath, JSON.stringify(json, null, 2), 'utf8');

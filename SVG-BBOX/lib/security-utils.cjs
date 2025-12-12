@@ -263,17 +263,22 @@ function validateFilePath(filePath, options = {}) {
   if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     // Check if within allowed directories
     const isAllowed = allowedDirs.some((dir) => {
-      // Also resolve allowed directories to their real paths for accurate comparison
-      let normalizedDir;
+      // Resolve allowed directory both to canonical (follows symlinks) and logical (non-symlink) paths
+      let canonicalDir;
+      const logicalDir = path.normalize(path.resolve(dir));
       try {
-        // For directories that exist, get their real path too
-        normalizedDir = fs.existsSync(dir)
-          ? fs.realpathSync(dir)
-          : path.normalize(path.resolve(dir));
+        canonicalDir = fs.existsSync(dir) ? fs.realpathSync(dir) : logicalDir;
       } catch {
-        normalizedDir = path.normalize(path.resolve(dir));
+        canonicalDir = logicalDir;
       }
-      return finalPath.startsWith(normalizedDir + path.sep) || finalPath === normalizedDir;
+
+      // Allow match against either canonical or logical to tolerate symlinked dirs (/tmp -> /private/tmp on macOS)
+      return (
+        finalPath.startsWith(canonicalDir + path.sep) ||
+        finalPath === canonicalDir ||
+        finalPath.startsWith(logicalDir + path.sep) ||
+        finalPath === logicalDir
+      );
     });
 
     if (!isAllowed) {
@@ -306,8 +311,22 @@ function validateFilePath(filePath, options = {}) {
  * @throws {Error} If validation fails
  */
 function validateOutputPath(filePath, options = {}) {
+  // Allow writing either inside the current working directory (repo) or in the
+  // system temporary directory (useful for CLI tools writing ephemeral JSON).
+  // Caller can extend/override via options.allowedDirs.
+  const defaultAllowedDirs = [
+    process.cwd(),
+    os.tmpdir(),
+    '/tmp',
+    '/private/tmp'
+  ];
+  const allowedDirs = options.allowedDirs
+    ? Array.from(new Set([...options.allowedDirs, ...defaultAllowedDirs]))
+    : defaultAllowedDirs;
+
   return validateFilePath(filePath, {
     ...options,
+    allowedDirs,
     mustExist: false
   });
 }
