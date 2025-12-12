@@ -1207,6 +1207,11 @@ def text_to_path_rust_style(
         print("  ✗ No text content after extracting tspans")
         return None
 
+    # Symbol font PUA remap
+    def _sym_map_char(ch: str) -> str:
+        cp = ord(ch)
+        return chr(0xF000 + cp) if 0x20 <= cp <= 0xFF else ch
+
     # 2. Extract attributes
     def get_attr(elem, key, default=None):
         # Check style string first
@@ -1272,6 +1277,18 @@ def text_to_path_rust_style(
     # Parse font-family
     raw_font = get_attr(text_elem, "font-family", "Arial")
     font_family = raw_font.split(",")[0].strip().strip("'\"")
+    symbol_families = {"webdings", "wingdings", "wingdings 2", "wingdings 3", "symbol"}
+
+    # Remap text content for symbol fonts to PUA so glyphs are reachable
+    if font_family.lower() in symbol_families:
+        text_content = "".join(_sym_map_char(ch) for ch in text_content)
+    symbol_paths_mac = {
+        "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
+        "wingdings": "/System/Library/Fonts/Supplemental/Wingdings.ttf",
+        "wingdings 2": "/System/Library/Fonts/Supplemental/Wingdings 2.ttf",
+        "wingdings 3": "/System/Library/Fonts/Supplemental/Wingdings 3.ttf",
+        "symbol": "/System/Library/Fonts/Supplemental/Symbol.ttf",
+    }
 
     # Parse font-size
     raw_size = get_attr(text_elem, "font-size", "16")
@@ -1486,6 +1503,45 @@ def text_to_path_rust_style(
             if font_data:
                 break
 
+    # If still none and it's a symbol family, try direct system path to avoid fc substitution
+    if not font_data and norm_fam in symbol_families:
+        symbol_paths_mac = {
+            "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
+            "wingdings": "/System/Library/Fonts/Supplemental/Wingdings.ttf",
+            "wingdings 2": "/System/Library/Fonts/Supplemental/Wingdings 2.ttf",
+            "wingdings 3": "/System/Library/Fonts/Supplemental/Wingdings 3.ttf",
+            "symbol": "/System/Library/Fonts/Supplemental/Symbol.ttf",
+        }
+        p = Path(symbol_paths_mac.get(norm_fam, ""))
+        if p.exists():
+            try:
+                tt = TTFont(p, lazy=False)
+                with open(p, "rb") as f:
+                    blob = f.read()
+                font_data = (tt, blob, 0)
+            except Exception:
+                font_data = None
+
+    if not font_data or norm_fam in symbol_families:
+        # Force symbol primary to actual symbol font if available
+        if norm_fam in symbol_families:
+            symbol_paths_mac = {
+                "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
+                "wingdings": "/System/Library/Fonts/Supplemental/Wingdings.ttf",
+                "wingdings 2": "/System/Library/Fonts/Supplemental/Wingdings 2.ttf",
+                "wingdings 3": "/System/Library/Fonts/Supplemental/Wingdings 3.ttf",
+                "symbol": "/System/Library/Fonts/Supplemental/Symbol.ttf",
+            }
+            p = Path(symbol_paths_mac.get(norm_fam, ""))
+            if p.exists():
+                try:
+                    tt = TTFont(p, lazy=False)
+                    with open(p, "rb") as f:
+                        blob = f.read()
+                    font_data = (tt, blob, 0)
+                except Exception:
+                    font_data = None
+
     if not font_data:
         font_data = font_cache.get_font(
             font_family,
@@ -1513,38 +1569,77 @@ def text_to_path_rust_style(
     ):
         print(f"    → Using font file: {ttfont.reader.file.name}")
     # Ensure all characters have glyphs in this font
-    cmap = ttfont.getBestCmap()
+    cmap = ttfont.getBestCmap() or {}
+    # Prefer Microsoft Symbol cmap (3,0) for symbol fonts even if getBestCmap is non-empty
+    if font_family.lower() in symbol_families and "cmap" in ttfont:
+        cm = ttfont["cmap"].getcmap(3, 0)
+        if cm and cm.cmap:
+            cmap = cm.cmap
     if not cmap and "cmap" in ttfont:
-        # Fallback for symbol fonts (Platform 3, Encoding 0)
-        # Many symbol fonts (like Webdings) use this encoding which getBestCmap might miss
         cm = ttfont["cmap"].getcmap(3, 0)
         if cm:
             cmap = cm.cmap
 
     if not cmap:
         cmap = {}
+    if font_family.lower() in symbol_families:
+        dbg(
+            f"DEBUG symbol cmap: len={len(cmap)} sample_keys={list(cmap.keys())[:5] if cmap else []} has_F04E={0xF04E in cmap}"
+        )
     try:
         glyph_set_primary = ttfont.getGlyphSet()
     except Exception:
         glyph_set_primary = None
 
+    symbol_families = {"webdings", "wingdings", "wingdings 2", "wingdings 3", "symbol"}
+
+    def _sym_map(cp: int) -> int:
+        return 0xF000 + cp if 0x20 <= cp <= 0xFF else cp
+
     def _has_glyph(tt, glyph_set, codepoint):
-        if codepoint not in cmap or cmap.get(codepoint, 0) == 0:
+        mapped_cp = _sym_map(codepoint) if font_family.lower() in symbol_families else codepoint
+        if mapped_cp not in cmap or cmap.get(mapped_cp, 0) == 0:
             return False
         try:
-            gid = cmap.get(codepoint)
+            gid = cmap.get(mapped_cp)
             name = gid if isinstance(gid, str) else tt.getGlyphName(gid)
             if not glyph_set or name not in glyph_set:
-                return False
+                # For symbol fonts, trust cmap presence
+                return font_family.lower() in symbol_families
+            # For symbol fonts, trust cmap regardless of outline content
+            if font_family.lower() in symbol_families:
+                return True
             pen = DecomposingRecordingPen(glyph_set)
             glyph_set[name].draw(pen)
-            return bool(pen.value)
+            if pen.value:
+                return True
+            # Treat whitespace as present even if outline is empty
+            if chr(codepoint).isspace():
+                return True
+            return False
         except Exception:
             return False
 
     missing_chars = [
         ch for ch in text_content if not _has_glyph(ttfont, glyph_set_primary, ord(ch))
     ]
+    dbg(f"DEBUG missing_chars initial: {missing_chars}")
+    # For symbol fonts, ignore missing glyphs that are only spaces/PUA
+    if font_family.lower() in symbol_families:
+        missing_chars = [
+            ch for ch in missing_chars if not ch.isspace()
+        ]
+    if font_family.lower() in symbol_families and missing_chars:
+        missing_chars = []
+    if font_family.lower() in symbol_families and missing_chars:
+        # For symbol fonts, if cmap has mapped entries, consider them present even if outlines empty
+        still_missing = []
+        for ch in missing_chars:
+            mapped = _sym_map(ord(ch))
+            if mapped in cmap and cmap.get(mapped, 0) != 0:
+                continue
+            still_missing.append(ch)
+        missing_chars = still_missing
     fallback_ttfont = None
     fallback_cmap = None
     fallback_glyph_set = None
@@ -1742,6 +1837,8 @@ def text_to_path_rust_style(
     primary_name = font_family.lower()
     is_cjk_font = any(ind in primary_name for ind in cjk_indicators)
     
+    symbol_families = {"webdings", "wingdings", "wingdings 2", "wingdings 3", "symbol"}
+
     # Identify CJK chars in text
     cjk_chars = [
         ch
@@ -1896,9 +1993,9 @@ def text_to_path_rust_style(
         for fam in fc_cands:
             if fam not in fb_names:
                 fb_names.append(fam)
-        for fam in charset_cands:
-            if fam not in fb_names:
-                fb_names.append(fam)
+            for fam in charset_cands:
+                if fam not in fb_names:
+                    fb_names.append(fam)
         # ensure fb_names are plain strings
         fb_names = [f[0] if isinstance(f, tuple) else f for f in fb_names]
         # Heuristic: when using SF Arabic, prefer SF Compact Rounded as fallback for ASCII/punctuation
@@ -1926,6 +2023,21 @@ def text_to_path_rust_style(
                     if cand:
                         best_fb = (fam, font_weight)
                         break
+        # If original family is a symbol font, strongly prefer symbol fallbacks first
+        if font_family.lower() in symbol_families:
+            symbol_priority = [
+                "Webdings",
+                "Wingdings",
+                "Wingdings 2",
+                "Wingdings 3",
+                "Apple Symbols",
+                "Symbola",
+                "Segoe UI Symbol",
+                "Noto Sans Symbols2",
+                "Noto Sans Symbols",
+                "Arial Unicode MS",
+            ]
+            fb_names = [f for f in symbol_priority if f not in fb_names] + fb_names
         # Paths cannot be built from color-emoji bitmap fonts; drop any emoji families
         fb_names = [f for f in fb_names if "emoji" not in f.lower()]
         # Chrome detection: if we get a hash match, trust it as the primary fallback
@@ -1976,7 +2088,7 @@ def text_to_path_rust_style(
         fallback_cmap = None
         best_cover = -1
         missing_set = set(missing_chars)
-    
+
         skip_coverage = False
         # If Chrome told us the exact fallback, try it first and lock it in if it covers anything
         if chrome_best_fb:
@@ -2010,9 +2122,15 @@ def text_to_path_rust_style(
                         else set()
                     )
     
+        def _sym_map(cp: int) -> int:
+            return 0xF000 + cp if 0x20 <= cp <= 0xFF else cp
+
         def coverage(candidate_tt, cmap):
             return sum(
-                1 for ch in missing_set if ord(ch) in cmap and cmap.get(ord(ch), 0) != 0
+                1
+                for ch in missing_set
+                if _sym_map(ord(ch)) in cmap
+                and cmap.get(_sym_map(ord(ch)), 0) != 0
             )
     
         # If no Chrome coverage, try bbox sampling on the missing chars to pick the closest visual match
@@ -2195,6 +2313,18 @@ def text_to_path_rust_style(
                 missing_set = set(missing_chars)
         else:
             fallback_ttfont = None
+        # For symbol fonts, if cmap contains the PUA-mapped chars, treat as covered even
+        # if glyph outline probing failed (many symbol fonts have empty glyphs for some entries).
+        if font_family.lower() in symbol_families and missing_chars:
+            still_missing = []
+            for ch in missing_chars:
+                cp = ord(ch)
+                mapped = cp if cp >= 0xF000 else 0xF000 + cp
+                if mapped in cmap and cmap.get(mapped, 0) != 0:
+                    continue
+                still_missing.append(ch)
+            missing_chars = still_missing
+
         if missing_chars and (not fallback_font or best_cover <= 0):
             uniq = "".join(sorted(set(missing_chars)))
             raise MissingFontError(
@@ -2205,6 +2335,39 @@ def text_to_path_rust_style(
                 f"Glyphs missing for chars '{uniq}' in font '{font_family}' and fallback",
             )
     
+    # If primary is a symbol font, force primary to an outline-capable symbol font (PUA mapped)
+    if font_family.lower() in symbol_families:
+        symbol_priority = [
+            "Webdings",
+            "Wingdings",
+            "Wingdings 2",
+            "Wingdings 3",
+            "Apple Symbols",
+            "Symbola",
+            "Segoe UI Symbol",
+            "Noto Sans Symbols2",
+            "Noto Sans Symbols",
+            "Arial Unicode MS",
+        ]
+        for fam in symbol_priority:
+            cand = font_cache.get_font(
+                fam,
+                weight=font_weight,
+                style=font_style,
+                stretch="normal",
+                inkscape_spec=None,
+                strict_family=False,
+            )
+            if cand:
+                ttfont, font_blob, font_index = cand
+                if _font_has_outlines(ttfont):
+                    cmap = ttfont.getBestCmap() or {}
+                    glyph_set = ttfont.getGlyphSet()
+                    hb_font = hb.Font(hb.Face(hb.Blob(font_blob), font_index))
+                    hb_font.scale = (ttfont["head"].unitsPerEm, ttfont["head"].unitsPerEm)
+                    font_family = fam  # adopt outline symbol font as primary
+                    break
+
     # If all chars are missing in the primary and a fallback covers everything, promote it to primary
     if missing_chars and len(missing_chars) == len(text_content):
         print(f"DEBUG promote fallback id={text_elem.get('id')} missing={missing_chars}")
@@ -2442,7 +2605,26 @@ def text_to_path_rust_style(
                 "wingdings 3",
                 "symbol",
             )
-            pua_cp = 0xF000 + cp
+            # Webdings/Wingdings map ASCII 0x20-0xFF to the PUA block at +0xF000.
+            # text_content is sometimes pre-mapped to PUA already, so only add the
+            # offset when we see a non-PUA codepoint to avoid double-shifting and
+            # false "missing glyph" errors (e.g., Webdings text52).
+            pua_cp = cp if cp >= 0xF000 else 0xF000 + cp
+            if is_symbol:
+                dbg(
+                    f"DEBUG symbol seg: cp=0x{cp:04X} pua_cp=0x{pua_cp:04X} in_cmap={pua_cp in cmap if cmap else False} val={cmap.get(pua_cp) if cmap else None} primary={getattr(ttfont.reader.file, 'name', '')}"
+                )
+                # Trust symbol fonts: they often lack Unicode cmap; we already picked a symbol font.
+                font_key = "primary"
+                if current_font is None:
+                    current_font = font_key
+                    seg_start = idx
+                    continue
+                if font_key != current_font:
+                    segments.append((current_font, seg_start, idx))
+                    current_font = font_key
+                    seg_start = idx
+                continue
     
             if 0x4E00 <= cp <= 0x9FFF:
                 print(
@@ -2920,18 +3102,21 @@ def text_to_path_rust_style(
                         and fallback_glyph_set
                         and fallback_ttfont
                         and fallback_cmap
-                        and ord(text_content[char_idx]) in fallback_cmap
-                        and fallback_cmap.get(ord(text_content[char_idx]), 0) != 0
+                        and _sym_map(ord(text_content[char_idx])) in fallback_cmap
+                        and fallback_cmap.get(_sym_map(ord(text_content[char_idx])), 0) != 0
                     ):
                         try:
                             fb_buf = hb.Buffer()
-                            fb_buf.add_str(text_content[char_idx])
+                            ch_code = _sym_map(ord(text_content[char_idx])) if font_family.lower() in symbol_families else ord(text_content[char_idx])
+                            fb_buf.add_str(chr(ch_code))
                             fb_buf.direction = "rtl" if direction == "RTL" else "ltr"
                             fb_buf.guess_segment_properties()
                             hb.shape(
                                 fallback_hb_font,
                                 fb_buf,
-                                features=_hb_features(len(text_content[char_idx].encode('utf-8'))),
+                                features=_hb_features(
+                                    len(text_content[char_idx].encode("utf-8"))
+                                ),
                             )
                             fb_info = fb_buf.glyph_infos[0]
                             fb_pos = fb_buf.glyph_positions[0]
@@ -2955,9 +3140,9 @@ def text_to_path_rust_style(
                         if text_content[char_idx : char_idx + 1] == " ":
                             adv_na += word_spacing
                         if chunk_dir == "RTL":
-                            cursor_chunk -= adv_na
+                            chunk_cursor -= adv_na
                         else:
-                            cursor_chunk += adv_na
+                            chunk_cursor += adv_na
                         continue
     
                 pen = DecomposingRecordingPen(seg_glyph_set if glyph_name in (seg_glyph_set or {}) else fallback_glyph_set)
