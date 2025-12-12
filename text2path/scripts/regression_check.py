@@ -9,8 +9,12 @@ Workflow:
 4) Detect regressions by comparing against the previous entry; if any diff worsens,
    print a warning.
 
-Defaults mirror our recent comparison settings (threshold=20, scale=1, resolution=4x,
-precision=3, no visual correction).
+Defaults mirror our recent comparison settings:
+- threshold=20
+- resolution=viewbox
+- scale=4
+- precision=3
+- no visual correction
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from main import convert_svg_text_to_paths, apply_visual_correction, FontCache  # type: ignore
+
+_SBB_RESOLUTION_MODES = {"nominal", "viewbox", "full", "scale", "stretch", "clip"}
 
 
 def repo_root() -> Path:
@@ -49,11 +55,16 @@ def main():
     )
     p.add_argument("--precision", type=int, default=3)
     p.add_argument("--threshold", type=int, default=20)
-    p.add_argument("--scale", type=float, default=1.0)
+    p.add_argument(
+        "--scale",
+        type=float,
+        default=4.0,
+        help="Render scale multiplier passed to sbb-comparer (default: 4).",
+    )
     p.add_argument(
         "--resolution",
-        default="4x",
-        help="Raster resolution passed to sbb-comparer (default: 4x)",
+        default="viewbox",
+        help="Resolution mode passed to sbb-comparer (default: viewbox).",
     )
     p.add_argument(
         "--apply-correction",
@@ -67,6 +78,11 @@ def main():
         help="Filenames to skip (e.g., text4.svg).",
     )
     p.add_argument(
+        "--include-paths",
+        action="store_true",
+        help="Also include already-paths samples like text2-paths.svg (default: off).",
+    )
+    p.add_argument(
         "--registry",
         default="tmp/regression_history.json",
         help="Path to regression history registry JSON file.",
@@ -78,6 +94,19 @@ def main():
         help="Comparer timeout in seconds (default: 300).",
     )
     args = p.parse_args()
+    # Back-compat / convenience: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
+    if isinstance(args.resolution, str) and args.resolution.lower().endswith("x"):
+        try:
+            parsed_scale = float(args.resolution[:-1])
+            if parsed_scale > 0:
+                args.scale = parsed_scale
+                args.resolution = "viewbox"
+        except Exception:
+            pass
+    if args.resolution not in _SBB_RESOLUTION_MODES:
+        raise SystemExit(
+            f"Invalid --resolution '{args.resolution}'. Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
+        )
 
     root = repo_root()
     samples_dir = (root / args.samples_dir).resolve()
@@ -91,7 +120,7 @@ def main():
     svgs = [
         p
         for p in sorted(samples_dir.glob("text*.svg"))
-        if p.name not in set(args.skip)
+        if p.name not in set(args.skip) and (args.include_paths or "-paths" not in p.name)
     ]
     if not svgs:
         print("No text*.svg files found; nothing to do.")
@@ -162,7 +191,18 @@ def main():
         except Exception:
             registry = []
 
-    prev_entry = registry[-1] if registry else None
+    # Only compare against the most recent entry with identical settings.
+    prev_entry = None
+    for entry in reversed(registry):
+        if (
+            entry.get("threshold") == args.threshold
+            and entry.get("scale") == args.scale
+            and entry.get("resolution") == args.resolution
+            and entry.get("precision") == args.precision
+            and bool(entry.get("apply_correction")) == bool(args.apply_correction)
+        ):
+            prev_entry = entry
+            break
     regressions = []
     if prev_entry and "results" in prev_entry:
         prev_results = prev_entry["results"]

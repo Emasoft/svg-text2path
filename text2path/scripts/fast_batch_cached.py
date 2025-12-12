@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from main import convert_svg_text_to_paths, apply_visual_correction  # type: ignore
 from main import FontCache  # type: ignore
 
+_SBB_RESOLUTION_MODES = {"nominal", "viewbox", "full", "scale", "stretch", "clip"}
+
 
 def convert_worker(payload: tuple[str, str, int, bool, bool]) -> tuple[str, str]:
     """Convert a single SVG to paths (optionally apply correction)."""
@@ -51,8 +53,22 @@ def main():
     p = argparse.ArgumentParser(description="Fast batch with cached fonts")
     p.add_argument("--out-dir", default="tmp/fast_cached", help="Output directory")
     p.add_argument("--threshold", type=int, default=20)
-    p.add_argument("--scale", type=float, default=1.0)
-    p.add_argument("--resolution", default="4x")
+    p.add_argument(
+        "--scale",
+        type=float,
+        default=4.0,
+        help="Render scale multiplier passed to sbb-comparer (default: 4).",
+    )
+    p.add_argument(
+        "--resolution",
+        default="viewbox",
+        help="Resolution mode passed to sbb-comparer (default: viewbox).",
+    )
+    p.add_argument(
+        "--include-paths",
+        action="store_true",
+        help="Also include already-paths samples like text2-paths.svg (default: off).",
+    )
     p.add_argument("--skip", nargs="*", default=["text4.svg"], help="Files to skip")
     p.add_argument("--precision", type=int, default=3, help="Path precision for converter")
     p.add_argument(
@@ -81,6 +97,19 @@ def main():
         help="Per-command timeout in seconds (applies to comparer). Default: 180.",
     )
     args = p.parse_args()
+    # Back-compat / convenience: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
+    if isinstance(args.resolution, str) and args.resolution.lower().endswith("x"):
+        try:
+            parsed_scale = float(args.resolution[:-1])
+            if parsed_scale > 0:
+                args.scale = parsed_scale
+                args.resolution = "viewbox"
+        except Exception:
+            pass
+    if args.resolution not in _SBB_RESOLUTION_MODES:
+        raise SystemExit(
+            f"Invalid --resolution '{args.resolution}'. Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
+        )
 
     root = repo_root()
     samples = root / "samples/reference_objects"
@@ -89,7 +118,11 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     conv_dir.mkdir(parents=True, exist_ok=True)
 
-    svgs = [svg for svg in sorted(samples.glob("text*.svg")) if svg.name not in args.skip]
+    svgs = [
+        svg
+        for svg in sorted(samples.glob("text*.svg"))
+        if svg.name not in args.skip and (args.include_paths or "-paths" not in svg.name)
+    ]
 
     # Always prewarm the font cache; if the on-disk cache was deleted, this rebuilds it once.
     fc = FontCache()

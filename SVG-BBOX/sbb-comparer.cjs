@@ -253,11 +253,6 @@ function parseArgs(argv) {
     aspectRatioThreshold: result.flags['aspect-ratio-threshold'] || 0.001
   };
 
-  // Auto-lower scale when tolerance is high (speed win)
-  if (args.threshold >= 10 && args.scale > 2) {
-    args.scale = 2;
-  }
-
   // Validate threshold range (1-20)
   if (args.threshold < 1 || args.threshold > 20) {
     throw new Error('--threshold must be between 1 and 20');
@@ -734,8 +729,26 @@ async function renderSvgToPng(svgPath, outputPath, width, height, browser) {
     </html>
   `);
 
-  // Wait for fonts and rendering
-  await new Promise((resolve) => setTimeout(resolve, FONT_TIMEOUT_MS));
+  // Wait for fonts/rendering, but return early when fonts are ready.
+  // The previous fixed delay was needlessly slow for cached/system fonts.
+  try {
+    await page.evaluate(
+      async (ms) => {
+        const sleep = (t) => new Promise((r) => setTimeout(r, t));
+        if (!document.fonts || !document.fonts.ready) {
+          await sleep(ms);
+          return;
+        }
+        await Promise.race([document.fonts.ready, sleep(ms)]);
+        // One frame to let layout/paint settle after fonts swap in.
+        await new Promise((r) => requestAnimationFrame(() => r()));
+      },
+      FONT_TIMEOUT_MS
+    );
+  } catch (e) {
+    // Fallback: preserve previous behavior if evaluation fails
+    await new Promise((resolve) => setTimeout(resolve, FONT_TIMEOUT_MS));
+  }
 
   await page.screenshot({
     path: safeOutputPath,
