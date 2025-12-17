@@ -1338,6 +1338,15 @@ def text_to_path_rust_style(
             except Exception:
                 pass
 
+    # SVG/CSS default: font-optical-sizing is 'auto'. If the font supports the
+    # OpenType variable axis 'opsz' and no explicit opsz is set, browsers
+    # typically auto-set opsz to the computed font-size.
+    font_optical_sizing = (
+        (get_attr(text_elem, "font-optical-sizing", "auto") or "auto")
+        .strip()
+        .lower()
+    )
+
     # Parse font-weight (use wght variation if present)
     raw_weight = get_attr(text_elem, "font-weight", "400")
     if raw_weight == "normal":
@@ -1560,6 +1569,26 @@ def text_to_path_rust_style(
         )
 
     ttfont, font_blob, font_index = font_data
+
+    # Auto-apply opsz for variable fonts when optical sizing is enabled and opsz is not explicitly set.
+    # Keep this limited to shaping (HarfBuzz variations); do not force outline instancing here to avoid
+    # regressions on variable-font samples with explicit font-variation-settings.
+    if font_optical_sizing != "none":
+        try:
+            if "fvar" in ttfont and not any(
+                tag.lower() == "opsz" for tag, _v in variation_settings
+            ):
+                for axis in ttfont["fvar"].axes:
+                    if axis.axisTag == "opsz":
+                        opsz_val = float(font_size)
+                        opsz_val = max(
+                            float(axis.minValue),
+                            min(float(axis.maxValue), opsz_val),
+                        )
+                        variation_settings.append(("opsz", opsz_val))
+                        break
+        except Exception:
+            pass
 
     # Log the actual font file being used
     if (
