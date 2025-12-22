@@ -2138,11 +2138,45 @@ def text_to_path_rust_style(
         fb_names = [f for f in fb_names if "emoji" not in f.lower()]
         preferred_fb = None
         preferred_candidate = None
+        primary_is_mono = False
+        try:
+            primary_is_mono = bool(ttfont["post"].isFixedPitch)
+        except Exception:
+            primary_is_mono = False
         arabic_missing = any(
             0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F
             for ch in missing_set
         )
         is_generic_sans = font_family.strip().lower() in ("sans", "sans-serif")
+        if arabic_missing and primary_is_mono:
+            mono_weight = 700 if font_weight >= 500 else 400
+            mono_styles = [font_style]
+            if font_style != "normal":
+                mono_styles.append("normal")
+            mono_priority = ["Courier New", "Courier", "Menlo", "Monaco"]
+            for fam in mono_priority:
+                cand = None
+                for style in mono_styles:
+                    cand = font_cache.get_font(
+                        fam,
+                        weight=mono_weight,
+                        style=style,
+                        stretch="normal",
+                        inkscape_spec=None,
+                        strict_family=False,
+                    )
+                    if cand:
+                        break
+                if not cand:
+                    continue
+                cmap_test = cand[0].getBestCmap() or {}
+                if all(
+                    ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
+                    for ch in missing_set
+                ):
+                    preferred_fb = (fam, mono_weight)
+                    preferred_candidate = cand
+                    break
         if arabic_missing and is_generic_sans:
             arabic_priority = [
                 "Geeza Pro",
