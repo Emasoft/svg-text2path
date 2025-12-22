@@ -3438,7 +3438,9 @@ def text_to_path_rust_style(
                 path_data = recording_pen_to_svg_path(transformed_recording, precision)
                 if path_data:
                     all_paths.append(path_data)
-    
+
+            current_x += chunk_width
+
         # Track per-line geometry for decorations
         if path_obj is None:
             start_x_line = x + line_anchor_offset
