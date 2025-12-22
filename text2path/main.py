@@ -2117,10 +2117,10 @@ def text_to_path_rust_style(
         is_generic_sans = font_family.strip().lower() in ("sans", "sans-serif")
         if arabic_missing and is_generic_sans:
             arabic_priority = [
-                "Noto Sans Arabic",
-                "Noto Naskh Arabic",
                 "Geeza Pro",
                 "Arial",
+                "Noto Sans Arabic",
+                "Noto Naskh Arabic",
                 "Arial Unicode MS",
                 "Times New Roman",
             ]
