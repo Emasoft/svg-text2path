@@ -1454,22 +1454,9 @@ def text_to_path_rust_style(
     font_data = None
 
     if norm_fam in ("sans", "sans-serif"):
-        sfns_path = Path(
-            "/System/Library/Fonts/SFNSItalic.ttf"
-            if font_style in ("italic", "oblique")
-            else "/System/Library/Fonts/SFNS.ttf"
-        )
-        if sfns_path.exists():
-            try:
-                tt = TTFont(sfns_path, lazy=True)
-                with open(sfns_path, "rb") as f:
-                    blob = f.read()
-                font_data = (tt, blob, 0)
-            except Exception:
-                font_data = None
-        if not font_data:
-            sans_candidates = [".SF NS Text", "Helvetica", "Arial", "Noto Sans"]
-            for fam in sans_candidates:
+        if norm_fam == "sans":
+            serif_candidates = ["Times", "Times New Roman", "Times Roman", "Noto Serif"]
+            for fam in serif_candidates:
                 cand = font_cache.get_font(
                     fam,
                     weight=font_weight,
@@ -1481,6 +1468,34 @@ def text_to_path_rust_style(
                 if cand:
                     font_data = cand
                     break
+        else:
+            sfns_path = Path(
+                "/System/Library/Fonts/SFNSItalic.ttf"
+                if font_style in ("italic", "oblique")
+                else "/System/Library/Fonts/SFNS.ttf"
+            )
+            if sfns_path.exists():
+                try:
+                    tt = TTFont(sfns_path, lazy=True)
+                    with open(sfns_path, "rb") as f:
+                        blob = f.read()
+                    font_data = (tt, blob, 0)
+                except Exception:
+                    font_data = None
+            if not font_data:
+                sans_candidates = [".SF NS Text", "Helvetica", "Arial", "Noto Sans"]
+                for fam in sans_candidates:
+                    cand = font_cache.get_font(
+                        fam,
+                        weight=font_weight,
+                        style=font_style,
+                        stretch=font_stretch,
+                        inkscape_spec=None,
+                        strict_family=False,
+                    )
+                    if cand:
+                        font_data = cand
+                        break
     if norm_fam in symbol_aliases:
         # Prefer platform symbol fonts; score by coverage of ASCII + dingbats
         symbol_candidates = [
