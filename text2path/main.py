@@ -2867,6 +2867,11 @@ def text_to_path_rust_style(
         # Shape each segment and store
         for font_key, s, e in segments:
             seg_text = run_text[s:e]
+            local_byte_offsets = [0]
+            acc_local = 0
+            for ch in seg_text:
+                acc_local += len(ch.encode("utf-8"))
+                local_byte_offsets.append(acc_local)
             # Debug print
             dbg(
                 f"DEBUG layout_line: font_family='{font_family}' font_key='{font_key}' text='{seg_text}'"
@@ -2992,7 +2997,7 @@ def text_to_path_rust_style(
                     "buf": buf,
                     "local_offset": s,
                     "run_text": run_text,
-                    "local_byte_offsets": None,
+                    "local_byte_offsets": local_byte_offsets,
                 }
             )
     
@@ -3201,11 +3206,21 @@ def text_to_path_rust_style(
                 chunk_origin = current_x + chunk_width
             else:
                 chunk_origin = current_x
-    
+            local_byte_offsets = chunk.get("local_byte_offsets")
+            if not local_byte_offsets:
+                local_byte_offsets = [0]
+                acc_local = 0
+                for ch in seg_text:
+                    acc_local += len(ch.encode("utf-8"))
+                    local_byte_offsets.append(acc_local)
+
             for info, pos in zip(seg_infos, seg_positions):
                 # HarfBuzz returns codepoint indices (not byte indices) when using add_str with Python strings
                 cluster = info.cluster
-                char_idx = cluster + chunk["start"]
+                char_idx_local = max(
+                    0, bisect.bisect_right(local_byte_offsets, cluster) - 1
+                )
+                char_idx = chunk["start"] + char_idx_local
                 current_dx = (
                     dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
                 )
