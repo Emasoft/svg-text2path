@@ -3092,7 +3092,9 @@ def text_to_path_rust_style(
         # Use base_dir (from SVG attribute) for alignment logic to match SVG spec/Chrome
         # This fixes the "Inkscape Arabic bug" where Inkscape ignores direction:ltr
         align_dir = base_dir
-    
+        line_dirs = {chunk.get("direction", "LTR") for chunk in line_chunks}
+        mixed_dir = "RTL" in line_dirs and "LTR" in line_dirs
+
         line_width = _measure_line_width(line_chunks)
         if text_anchor == "middle":
             line_anchor_offset = -line_width / 2.0
@@ -3201,8 +3203,9 @@ def text_to_path_rust_style(
             # if chunk_dir == 'RTL':
             #     chunk_cursor = chunk_width # WRONG if chunk_origin is already shifted
     
-            # So for RTL, we want to start at the RIGHT edge of the allocated space.
-            if chunk_dir == "RTL":
+            # For mixed-direction lines, HarfBuzz already outputs RTL glyphs in visual order.
+            # For pure RTL lines, keep legacy right-edge placement.
+            if chunk_dir == "RTL" and not mixed_dir:
                 chunk_origin = current_x + chunk_width
             else:
                 chunk_origin = current_x
@@ -3237,7 +3240,7 @@ def text_to_path_rust_style(
                 # Apply dx to cursor (accumulate shift)
                 chunk_cursor += current_dx
     
-                if chunk_dir == "RTL":
+                if chunk_dir == "RTL" and not mixed_dir:
                     chunk_cursor -= adv
                     glyph_origin = chunk_origin + chunk_cursor
                 else:
