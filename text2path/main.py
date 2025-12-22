@@ -2001,6 +2001,7 @@ def text_to_path_rust_style(
             return ["Apple Symbols", "Arial Unicode MS", "Last Resort"]
     
         fb_names = pick_fallback(missing_chars)
+        missing_set = set(missing_chars)
         if any(
             (0x2600 <= ord(ch) <= 0x27FF) or (0x1F300 <= ord(ch) <= 0x1FAFF)
             for ch in missing_chars
@@ -2069,13 +2070,52 @@ def text_to_path_rust_style(
             fb_names = [f for f in symbol_priority if f not in fb_names] + fb_names
         # Paths cannot be built from color-emoji bitmap fonts; drop any emoji families
         fb_names = [f for f in fb_names if "emoji" not in f.lower()]
-        # Chrome detection: if we get a hash match, trust it as the primary fallback
-        chrome_best_fb = detect_chrome_font(
-            text_content, font_size, font_weight, fb_names, font_family, Path(__file__).parent.parent
+        preferred_fb = None
+        arabic_missing = any(
+            0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F
+            for ch in missing_set
         )
+        is_generic_sans = font_family.strip().lower() in ("sans", "sans-serif")
+        if arabic_missing and is_generic_sans:
+            arabic_priority = [
+                "Noto Sans Arabic",
+                "Noto Naskh Arabic",
+                "Geeza Pro",
+                "Arial",
+                "Arial Unicode MS",
+                "Times New Roman",
+            ]
+            for fam in arabic_priority:
+                cand = font_cache.get_font(
+                    fam,
+                    weight=font_weight,
+                    style=font_style,
+                    stretch="normal",
+                    inkscape_spec=None,
+                    strict_family=False,
+                )
+                if not cand:
+                    continue
+                cmap_test = cand[0].getBestCmap() or {}
+                if all(
+                    ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
+                    for ch in missing_set
+                ):
+                    preferred_fb = (fam, font_weight)
+                    break
+
+        # Chrome detection: if we get a hash match, trust it as the primary fallback
+        if preferred_fb:
+            chrome_best_fb = None
+        else:
+            chrome_best_fb = detect_chrome_font(
+                text_content, font_size, font_weight, fb_names, font_family, Path(__file__).parent.parent
+            )
         # bbox + weight grid chooser (only if Chrome didn't give us a decisive answer)
         best_fb = None
-        if chrome_best_fb:
+        if preferred_fb:
+            best_fb = preferred_fb
+        elif chrome_best_fb:
             best_fb = (chrome_best_fb, font_weight)
         else:
             best_fb = (
@@ -2116,8 +2156,6 @@ def text_to_path_rust_style(
         fallback_font = None
         fallback_cmap = None
         best_cover = -1
-        missing_set = set(missing_chars)
-
         skip_coverage = False
         # If Chrome told us the exact fallback, try it first and lock it in if it covers anything
         if chrome_best_fb:
