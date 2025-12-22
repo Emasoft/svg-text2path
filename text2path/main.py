@@ -2000,6 +2000,44 @@ def text_to_path_rust_style(
     
             return ["Apple Symbols", "Arial Unicode MS", "Last Resort"]
     
+        def _load_family_candidate(
+            family: str, avoid_tokens: list[str] | None = None
+        ):
+            """Load a candidate font by family name, optionally skipping file paths with tokens."""
+            font_cache._load_fc_cache()
+            fam_norm = family.strip().lower()
+            best = None
+            best_score = None
+            for path, fams, _styles, ps, weight_val in font_cache._fc_cache or []:
+                fam_hit = any(
+                    fam_norm == f or fam_norm.lstrip(".") == f.lstrip(".") for f in fams
+                )
+                ps_norm = (ps or "").lower()
+                if not fam_hit and fam_norm != ps_norm and fam_norm.lstrip(".") != ps_norm.lstrip("."):
+                    continue
+                if avoid_tokens and any(tok in path.name.lower() for tok in avoid_tokens):
+                    continue
+                try:
+                    score = abs((weight_val or 0) - font_weight)
+                except Exception:
+                    score = 0
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best = (path, 0)
+            if best:
+                path, idx = best
+                try:
+                    if path.suffix.lower() == ".ttc":
+                        tt = TTFont(path, fontNumber=idx, lazy=True)
+                    else:
+                        tt = TTFont(path, lazy=True)
+                    with open(path, "rb") as f:
+                        blob = f.read()
+                    return (tt, blob, idx)
+                except Exception:
+                    return None
+            return None
+
         fb_names = pick_fallback(missing_chars)
         missing_set = set(missing_chars)
         if any(
@@ -2071,6 +2109,7 @@ def text_to_path_rust_style(
         # Paths cannot be built from color-emoji bitmap fonts; drop any emoji families
         fb_names = [f for f in fb_names if "emoji" not in f.lower()]
         preferred_fb = None
+        preferred_candidate = None
         arabic_missing = any(
             0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F
             for ch in missing_set
@@ -2086,14 +2125,19 @@ def text_to_path_rust_style(
                 "Times New Roman",
             ]
             for fam in arabic_priority:
-                cand = font_cache.get_font(
-                    fam,
-                    weight=font_weight,
-                    style=font_style,
-                    stretch="normal",
-                    inkscape_spec=None,
-                    strict_family=False,
-                )
+                cand = None
+                avoid_tokens = ["condensed"] if fam.lower() == "noto sans arabic" else None
+                if avoid_tokens:
+                    cand = _load_family_candidate(fam, avoid_tokens=avoid_tokens)
+                if not cand:
+                    cand = font_cache.get_font(
+                        fam,
+                        weight=font_weight,
+                        style=font_style,
+                        stretch="normal",
+                        inkscape_spec=None,
+                        strict_family=False,
+                    )
                 if not cand:
                     continue
                 cmap_test = cand[0].getBestCmap() or {}
@@ -2102,6 +2146,7 @@ def text_to_path_rust_style(
                     for ch in missing_set
                 ):
                     preferred_fb = (fam, font_weight)
+                    preferred_candidate = cand
                     break
 
         # Chrome detection: if we get a hash match, trust it as the primary fallback
@@ -2157,6 +2202,12 @@ def text_to_path_rust_style(
         fallback_cmap = None
         best_cover = -1
         skip_coverage = False
+        if preferred_candidate:
+            fallback_font = preferred_candidate
+            fallback_cmap = preferred_candidate[0].getBestCmap() or {}
+            best_cover = len(missing_set)
+            skip_coverage = True
+            missing_set = set()
         # If Chrome told us the exact fallback, try it first and lock it in if it covers anything
         if chrome_best_fb:
             candidate = font_cache.get_font(
