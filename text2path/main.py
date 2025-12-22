@@ -2181,8 +2181,13 @@ def text_to_path_rust_style(
         if preferred_fb:
             chrome_best_fb = None
         else:
+            chrome_text = "".join(
+                ch if ch in missing_set else " " for ch in text_content
+            ).strip()
+            if not chrome_text:
+                chrome_text = "".join(missing_chars)
             chrome_best_fb = detect_chrome_font(
-                text_content, font_size, font_weight, fb_names, font_family, Path(__file__).parent.parent
+                chrome_text, font_size, font_weight, fb_names, font_family, Path(__file__).parent.parent
             )
         # bbox + weight grid chooser (only if Chrome didn't give us a decisive answer)
         best_fb = None
