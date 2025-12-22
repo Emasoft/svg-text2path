@@ -4201,6 +4201,146 @@ def convert_svg_text_to_paths(
                 if not parent_anchor:
                     parent_anchor = "start"
 
+                def _is_tspan(elem: ET.Element) -> bool:
+                    tag = elem.tag
+                    if "}" in tag:
+                        tag = tag.split("}", 1)[1]
+                    return tag == "tspan"
+
+                def _style_matches_parent(span_style: str) -> bool:
+                    if not span_style:
+                        return True
+                    def _style_dict(style_str: str) -> dict[str, str]:
+                        out: dict[str, str] = {}
+                        for prop in style_str.split(";"):
+                            if ":" not in prop:
+                                continue
+                            k, v = prop.split(":", 1)
+                            k = k.strip()
+                            if k in ("text-anchor", "text-align"):
+                                continue
+                            out[k] = v.strip()
+                        return out
+
+                    merged = merge_style(parent_style, span_style)
+                    return _style_dict(merged) == _style_dict(parent_style)
+
+                has_dx_child = False
+                can_flatten_dx = path_obj is None
+                for line_span in tspans:
+                    if not can_flatten_dx:
+                        break
+                    if line_span.get("style") and not _style_matches_parent(
+                        line_span.get("style", "")
+                    ):
+                        can_flatten_dx = False
+                        break
+                    for child in list(line_span):
+                        if not _is_tspan(child):
+                            continue
+                        if list(child):
+                            can_flatten_dx = False
+                            break
+                        if child.get("x") or child.get("y"):
+                            if (child.text or "").strip():
+                                can_flatten_dx = False
+                                break
+                        if child.get("style") and not _style_matches_parent(
+                            child.get("style", "")
+                        ):
+                            can_flatten_dx = False
+                            break
+                        if "dx" in child.attrib or "dy" in child.attrib:
+                            has_dx_child = True
+                    if not can_flatten_dx:
+                        break
+
+                if can_flatten_dx and has_dx_child:
+                    def _append_text_with_offsets(
+                        text: str | None,
+                        dx_vals: list[float],
+                        dy_vals: list[float],
+                        text_parts: list[str],
+                        dx_out: list[float],
+                        dy_out: list[float],
+                    ) -> None:
+                        if not text:
+                            return
+                        text_parts.append(text)
+                        for i, _ch in enumerate(text):
+                            dx_out.append(dx_vals[i] if i < len(dx_vals) else 0.0)
+                            dy_out.append(dy_vals[i] if i < len(dy_vals) else 0.0)
+
+                    for line_idx, line_span in enumerate(tspans):
+                        line_text_parts: list[str] = []
+                        dx_list_line: list[float] = []
+                        dy_list_line: list[float] = []
+                        _append_text_with_offsets(
+                            line_span.text, [], [], line_text_parts, dx_list_line, dy_list_line
+                        )
+                        for child in list(line_span):
+                            if not _is_tspan(child):
+                                continue
+                            dx_vals = (
+                                _parse_num_list(child.get("dx", ""))
+                                if "dx" in child.attrib
+                                else []
+                            )
+                            dy_vals = (
+                                _parse_num_list(child.get("dy", ""))
+                                if "dy" in child.attrib
+                                else []
+                            )
+                            _append_text_with_offsets(
+                                child.text, dx_vals, dy_vals, line_text_parts, dx_list_line, dy_list_line
+                            )
+                            _append_text_with_offsets(
+                                child.tail, [], [], line_text_parts, dx_list_line, dy_list_line
+                            )
+
+                        line_text = "".join(line_text_parts)
+                        if not line_text.strip():
+                            continue
+                        line_x = line_span.get("x") or base_x
+                        line_y = line_span.get("y") or base_y
+
+                        temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                        temp_text.set("x", str(line_x))
+                        temp_text.set("y", str(line_y))
+                        if parent_style:
+                            temp_text.set("style", parent_style)
+                        if parent_anchor:
+                            temp_text.set("text-anchor", parent_anchor)
+                        temp_text.text = line_text
+
+                        result_line = text_to_path_rust_style(
+                            temp_text,
+                            font_cache,
+                            None,
+                            path_start_offset=0.0,
+                            precision=precision,
+                            dx_list=dx_list_line,
+                            dy_list=dy_list_line,
+                        )
+                        if result_line is not None:
+                            path_elem, _ = result_line
+                            if "transform" in path_elem.attrib:
+                                del path_elem.attrib["transform"]
+                            path_elem.set("id", f"{elem_id}_tspan{temp_id_counter}")
+                            temp_id_counter += 1
+                            group_elem.append(path_elem)
+                            tspan_converted += 1
+
+                    if tspan_converted > 0:
+                        idx = list(parent).index(text_elem)
+                        parent.remove(text_elem)
+                        parent.insert(idx, group_elem)
+                        converted += 1
+                        print(
+                            f"    ✓ Converted successfully ({tspan_converted} leaf span(s))"
+                        )
+                        continue
+
                 def span_anchor(span: ET.Element, fallback: str) -> str:
                     anchor = span.get("text-anchor", None)
                     if not anchor:
