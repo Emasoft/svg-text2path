@@ -1746,6 +1746,13 @@ def text_to_path_rust_style(
     cjk_scale = None
     cjk_glyph_set = None
     cjk_cmap = None
+    symbol_ttfont = None
+    symbol_blob = None
+    symbol_index = None
+    symbol_hb_font = None
+    symbol_scale = None
+    symbol_glyph_set = None
+    symbol_cmap = None
     
     # Identify CJK chars in text to check coverage
     cjk_chars_in_text = [
@@ -2446,55 +2453,89 @@ def text_to_path_rust_style(
                 if best_cover == len(missing_set):
                     break
     
-        # Absolute last-resort (and override) for symbol glyphs: platform-aware outline fallback, bypass coverage checks.
+        # Dedicated symbol fallback for dingbats (keep separate from general fallback).
         if any(0x2600 <= ord(ch) <= 0x27FF for ch in missing_chars):
-            needs_symbol = True
-            if fallback_cmap:
-                symbol_missing = [
+            symbol_missing = [
+                ch for ch in missing_chars if 0x2600 <= ord(ch) <= 0x27FF
+            ]
+            candidate = None
+            best_symbol = None
+            best_cov = -1
+            symbol_candidates = [
+                "Noto Sans Symbols2",
+                "Times New Roman",
+                "Apple Symbols",
+                "Symbola",
+                "Segoe UI Symbol",
+                "Arial Unicode MS",
+                "Noto Sans Symbols",
+            ]
+            # 1) Platform-specific paths
+            for p in _os_symbol_candidates():
+                try:
+                    tt = TTFont(p, lazy=False)
+                    if not _font_has_outlines(tt):
+                        continue
+                    cmap_test = tt.getBestCmap() or {}
+                    cov = sum(
+                        1
+                        for ch in symbol_missing
+                        if ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
+                    )
+                    if cov > best_cov:
+                        with open(p, "rb") as f:
+                            blob = f.read()
+                        best_symbol = (tt, blob, 0)
+                        best_cov = cov
+                    if cov == len(symbol_missing):
+                        break
+                except Exception:
+                    continue
+            # 2) fontconfig/name fallbacks
+            if best_symbol is None:
+                for fam in symbol_candidates:
+                    c = font_cache.get_font(
+                        fam,
+                        weight=400,
+                        style="normal",
+                        stretch="normal",
+                        inkscape_spec=None,
+                        strict_family=False,
+                    )
+                    if not c or not _font_has_outlines(c[0]):
+                        continue
+                    cmap_test = c[0].getBestCmap() or {}
+                    cov = sum(
+                        1
+                        for ch in symbol_missing
+                        if ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
+                    )
+                    if cov > best_cov:
+                        best_symbol = c
+                        best_cov = cov
+                    if cov == len(symbol_missing):
+                        break
+            candidate = best_symbol
+            if candidate and _font_has_outlines(candidate[0]):
+                symbol_ttfont, symbol_blob, symbol_index = candidate
+                symbol_cmap = symbol_ttfont.getBestCmap() or {}
+                symbol_glyph_set = symbol_ttfont.getGlyphSet()
+                symbol_scale = (
+                    (font_size / symbol_ttfont["head"].unitsPerEm)
+                    if symbol_ttfont
+                    else 1.0
+                )
+                # Remove symbol chars now covered so missing checks don't fail.
+                missing_chars = [
                     ch
                     for ch in missing_chars
-                    if 0x2600 <= ord(ch) <= 0x27FF
-                    and (ord(ch) not in fallback_cmap or fallback_cmap.get(ord(ch), 0) == 0)
+                    if not (
+                        0x2600 <= ord(ch) <= 0x27FF
+                        and ord(ch) in symbol_cmap
+                        and symbol_cmap.get(ord(ch), 0) != 0
+                    )
                 ]
-                needs_symbol = bool(symbol_missing)
-            if needs_symbol:
-                candidate = None
-                # 1) Platform-specific paths
-                for p in _os_symbol_candidates():
-                    try:
-                        tt = TTFont(p, lazy=False)
-                        if _font_has_outlines(tt):
-                            with open(p, "rb") as f:
-                                blob = f.read()
-                            candidate = (tt, blob, 0)
-                            break
-                    except Exception:
-                        continue
-                # 2) fontconfig/name fallbacks if path not found
-                if candidate is None:
-                    for fam in ("Apple Symbols", "Segoe UI Symbol", "Symbola", "Arial Unicode MS"):
-                        c = font_cache.get_font(
-                            fam,
-                            weight=400,
-                            style="normal",
-                            stretch="normal",
-                            inkscape_spec=None,
-                            strict_family=False,
-                        )
-                        if c and _font_has_outlines(c[0]):
-                            candidate = c
-                            break
-                if candidate and _font_has_outlines(candidate[0]):
-                    fallback_font = candidate
-                    fallback_cmap = candidate[0].getBestCmap() or {}
-                    best_cover = max(best_cover, len([ch for ch in missing_chars if 0x2600 <= ord(ch) <= 0x27FF]))
-                    # remove symbol chars now covered
-                    missing_chars = [
-                        ch
-                        for ch in missing_chars
-                        if not (0x2600 <= ord(ch) <= 0x27FF and ord(ch) in fallback_cmap and fallback_cmap.get(ord(ch), 0) != 0)
-                    ]
-                    missing_set = set(missing_chars)
+                missing_set = set(missing_chars)
     
         if fallback_font:
             fallback_ttfont, fallback_blob, fallback_index = fallback_font
@@ -2709,6 +2750,17 @@ def text_to_path_rust_style(
                 fallback_hb_font = fb_font
             except Exception:
                 fallback_hb_font = None
+
+        # Symbol HB font (dingbat fallback)
+        if symbol_ttfont and symbol_blob is not None:
+            try:
+                sym_face = hb.Face(hb.Blob(symbol_blob), symbol_index or 0)
+                sym_font = hb.Font(sym_face)
+                sym_units = symbol_ttfont["head"].unitsPerEm
+                sym_font.scale = (sym_units, sym_units)
+                symbol_hb_font = sym_font
+            except Exception:
+                symbol_hb_font = None
     
         if text_content and len(text_content) == 1 and text_content in "☰":
             dbg(
@@ -2842,6 +2894,13 @@ def text_to_path_rust_style(
                 # Prioritize CJK font for CJK characters
                 font_key = "cjk"
             elif (
+                0x2600 <= cp <= 0x27FF
+                and symbol_cmap
+                and cp in symbol_cmap
+                and symbol_cmap.get(cp, 0) != 0
+            ):
+                font_key = "symbol"
+            elif (
                 prefer_fallback
                 and fallback_cmap
                 and cp in fallback_cmap
@@ -2912,6 +2971,16 @@ def text_to_path_rust_style(
                     if cjk_ttfont:
                         dbg(f"DEBUG text4: CJK Font Name: {cjk_ttfont.reader.file.name}")
                         dbg(f"DEBUG text4: CJK UnitsPerEm: {cjk_ttfont['head'].unitsPerEm}")
+            elif font_key == "symbol":
+                seg_ttfont = symbol_ttfont
+                seg_scale = symbol_scale
+                seg_hb_font = symbol_hb_font
+                seg_glyph_set = symbol_glyph_set
+                seg_cmap = symbol_cmap
+                if "text4" in str(text_elem.get("id")) or "兛" in text_content:
+                    dbg(f"DEBUG text4: Using SYMBOL font. Scale={symbol_scale}")
+                    if symbol_ttfont and hasattr(symbol_ttfont, "reader"):
+                        dbg(f"DEBUG text4: Symbol Font Name: {symbol_ttfont.reader.file.name}")
             else:  # fallback
                 seg_ttfont = fallback_ttfont
                 seg_scale = fallback_scale
@@ -4167,6 +4236,13 @@ def convert_svg_text_to_paths(
 
                 tspan_converted = 0
                 temp_id_counter = 0
+                def _set_path_id(path_elem: ET.Element, preferred_id: str | None) -> None:
+                    nonlocal temp_id_counter
+                    if preferred_id:
+                        path_elem.set("id", preferred_id)
+                    else:
+                        path_elem.set("id", f"{elem_id}_tspan{temp_id_counter}")
+                    temp_id_counter += 1
 
                 leaf_items = []
 
