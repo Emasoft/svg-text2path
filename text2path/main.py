@@ -313,6 +313,17 @@ class FontCache:
         }
         return weight_map.get(weight)
 
+    # TODO(TTC-fix): Current cache stores only the FIRST font from TTC/OTC collections.
+    # This causes fonts like "Futura Medium Italic" (stored in Futura.ttc) to not be found.
+    # The fix is to:
+    # 1. Change cache to 6-tuple: (path, font_index, fams, styles, ps, weight)
+    # 2. Use TTCollection to iterate ALL fonts in TTC/OTC files during cache build
+    # 3. Store each font face as a separate cache entry with its font_index
+    # 4. Remove pick_face() in _match_exact and use cached font_index directly
+    # This fix was tested 2025-12-31 and improved text3.svg (12.35%→2.94%) and text54.svg
+    # (12.89%→0.78%), but the stash also included variable font instancing which caused
+    # text39.svg regression. Apply TTC fix ONLY, without variable font instancing.
+    # Bump _cache_version to 4 when implementing this fix.
     _fc_cache: list[tuple[Path, list[str], list[str], str, int]] | None = None
     _cache_file: Path | None = None
     _cache_version: int = 3
@@ -1632,6 +1643,17 @@ def text_to_path_rust_style(
                         break
         except Exception:
             pass
+
+    # WARNING: DO NOT use fontTools.varLib.instancer to apply variable font instances to glyph
+    # outlines. Testing showed this causes significant regression (e.g., text39.svg with .New York
+    # variable font went from 18.52% to 25.03% diff). The instancer modifies glyph outlines in ways
+    # that don't match Chrome's variable font rendering. Chrome handles variation axes internally
+    # and applying instancer.instantiateVariableFont() produces different glyph shapes.
+    # The correct approach is to:
+    # 1. Pass variation_settings to HarfBuzz for shaping (already done)
+    # 2. Let HarfBuzz apply variations to advance/positioning
+    # 3. Use the original variable font outlines (not instanced) for path extraction
+    # Tested 2025-12-31: variable font instancing BREAKS variable font rendering.
 
     # Log the actual font file being used
     if (
