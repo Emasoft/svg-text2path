@@ -283,7 +283,7 @@ class FontCache:
         self._fonts: dict[
             str, tuple[TTFont, bytes, int]
         ] = {}  # Cache: font_spec -> (TTFont, bytes, face_index)
-        self._coverage_cache: dict[Path, set[int]] = {}
+        self._coverage_cache: dict[tuple[Path, int], set[int]] = {}  # (path, font_index) -> codepoints
 
     def _parse_inkscape_spec(self, inkscape_spec: str) -> tuple[str, str | None]:
         """Parse Inkscape font specification like 'Futura, Medium' or '.New York, Italic'."""
@@ -313,20 +313,13 @@ class FontCache:
         }
         return weight_map.get(weight)
 
-    # TODO(TTC-fix): Current cache stores only the FIRST font from TTC/OTC collections.
-    # This causes fonts like "Futura Medium Italic" (stored in Futura.ttc) to not be found.
-    # The fix is to:
-    # 1. Change cache to 6-tuple: (path, font_index, fams, styles, ps, weight)
-    # 2. Use TTCollection to iterate ALL fonts in TTC/OTC files during cache build
-    # 3. Store each font face as a separate cache entry with its font_index
-    # 4. Remove pick_face() in _match_exact and use cached font_index directly
-    # This fix was tested 2025-12-31 and improved text3.svg (12.35%→2.94%) and text54.svg
-    # (12.89%→0.78%), but the stash also included variable font instancing which caused
-    # text39.svg regression. Apply TTC fix ONLY, without variable font instancing.
-    # Bump _cache_version to 4 when implementing this fix.
-    _fc_cache: list[tuple[Path, list[str], list[str], str, int]] | None = None
+    # TTC-fix applied 2025-12-31: Cache now stores ALL fonts from TTC/OTC collections.
+    # This fixes fonts like "Futura Medium Italic" (stored in Futura.ttc) being found.
+    # The fix uses 6-tuple with font_index and iterates all fonts in TTC/OTC files.
+    # Tested: improved text3.svg (12.35%→2.94%) and text54.svg (12.89%→0.78%).
+    _fc_cache: list[tuple[Path, int, list[str], list[str], str, int]] | None = None  # (path, font_index, fams, styles, ps, weight)
     _cache_file: Path | None = None
-    _cache_version: int = 3
+    _cache_version: int = 4  # v4: stores all fonts from TTC collections with font_index
     _prebaked: dict[str, list[dict]] | None = None
     _cache_partial: bool = False
 
@@ -367,7 +360,7 @@ class FontCache:
         return self._cache_file
 
     def _load_persistent_cache(self) -> tuple[
-        list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]], bool
+        list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool
     ] | None:
         """Load cached font metadata if present and fresh."""
         cache_path = self._cache_path()
@@ -384,7 +377,7 @@ class FontCache:
             for d in dirs_state:
                 if not Path(d).exists() or int(Path(d).stat().st_mtime) != dirs_state[d]:
                     return None
-            entries: list[tuple[Path, list[str], list[str], str, int]] = []
+            entries: list[tuple[Path, int, list[str], list[str], str, int]] = []
             for rec in data.get("fonts", []):
                 p = Path(rec["path"])
                 if not p.exists():
@@ -394,6 +387,7 @@ class FontCache:
                 entries.append(
                     (
                         p,
+                        int(rec.get("font_index", 0)),  # font_index for TTC collections
                         [f.lower() for f in rec.get("families", [])],
                         [s.lower() for s in rec.get("styles", [])],
                         rec.get("ps", "").lower(),
@@ -420,11 +414,52 @@ class FontCache:
         sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
         sys.stdout.flush()
 
-    def _read_font_meta(self, path: Path, need_flags: bool) -> tuple[Path, list[str], list[str], str, int, dict] | None:
+    def _read_font_meta(self, path: Path, need_flags: bool) -> list[tuple[Path, int, list[str], list[str], str, int, dict]] | None:
+        """Read font metadata from a font file.
+
+        For TTC/OTC collections, returns ALL fonts in the collection (not just the first).
+        This is critical for fonts like Futura.ttc which contain multiple styles.
+
+        Returns list of tuples: (path, font_index, families, styles, psname, weight, flags)
+        """
         try:
-            if path.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
+            suffix = path.suffix.lower()
+            if suffix not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
                 return None
-            tt = TTFont(path, lazy=True, fontNumber=0 if path.suffix.lower() != ".ttc" else None)
+
+            results: list[tuple[Path, int, list[str], list[str], str, int, dict]] = []
+
+            # For TTC/OTC collections, iterate ALL fonts to capture all styles
+            if suffix in {".ttc", ".otc"}:
+                from fontTools.ttLib import TTCollection
+                try:
+                    coll = TTCollection(path, lazy=True)
+                    for font_index, tt in enumerate(coll.fonts):
+                        meta = self._extract_single_font_meta(path, font_index, tt, need_flags)
+                        if meta:
+                            results.append(meta)
+                except Exception:
+                    # Fallback: try reading as single font with fontNumber=0
+                    tt = TTFont(path, lazy=True, fontNumber=0)
+                    meta = self._extract_single_font_meta(path, 0, tt, need_flags)
+                    if meta:
+                        results.append(meta)
+            else:
+                # Single font file
+                tt = TTFont(path, lazy=True)
+                meta = self._extract_single_font_meta(path, 0, tt, need_flags)
+                if meta:
+                    results.append(meta)
+
+            return results if results else None
+        except Exception:
+            return None
+
+    def _extract_single_font_meta(
+        self, path: Path, font_index: int, tt: TTFont, need_flags: bool
+    ) -> tuple[Path, int, list[str], list[str], str, int, dict] | None:
+        """Extract metadata from a single font face."""
+        try:
             names = tt["name"]
             fams = []
             for nid in (16, 1):
@@ -456,11 +491,12 @@ class FontCache:
                     flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(0x3040 <= c <= 0x30FF for c in codes)
                 except Exception:
                     pass
-            return (path, fams, styles, psname, weight, flags)
+            return (path, font_index, fams, styles, psname, weight, flags)
         except Exception:
             return None
 
-    def _build_cache_entries(self) -> tuple[list[tuple[Path, list[str], list[str], str, int]], dict[str, list[dict]], bool]:
+    def _build_cache_entries(self) -> tuple[list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool]:
+        """Build font cache entries, including ALL fonts from TTC/OTC collections."""
         dirs = self._font_dirs()
         font_files: set[Path] = set()
         for d in dirs:
@@ -472,7 +508,8 @@ class FontCache:
         # Deduplicate by resolved path
         font_list = sorted({p.resolve() for p in font_files if p.exists()})
 
-        entries: list[tuple[Path, list[str], list[str], str, int]] = []
+        # Now stores 6-tuples: (path, font_index, fams, styles, ps, weight)
+        entries: list[tuple[Path, int, list[str], list[str], str, int]] = []
         prebaked: dict[str, list[dict]] = {}
         prebake_fams = {
             "arial",
@@ -498,24 +535,30 @@ class FontCache:
         with ThreadPoolExecutor(max_workers=4) as ex:
             futures = {ex.submit(self._read_font_meta, p, False): p for p in font_list}
             for fut in as_completed(futures):
-                meta = fut.result()
-                if meta:
-                    path, fams, styles, ps, weight, _flags = meta
-                    entries.append((path, fams, styles, ps, weight))
-                    fam_set = set(fams) | ({ps} if ps else set())
-                    if fam_set & prebake_fams:
-                        prebake_key = list(fam_set & prebake_fams)[0]
-                        # For prebake candidates, compute flags lazily now (may need to reopen)
-                        flags = {}
-                        try:
-                            flags_meta = self._read_font_meta(path, True)
-                            if flags_meta:
-                                flags = flags_meta[-1]
-                        except Exception:
-                            pass
-                        prebaked.setdefault(prebake_key, []).append(
-                            {"path": str(path), "styles": styles, "ps": ps, "weight": weight, "flags": flags}
-                        )
+                meta_list = fut.result()
+                # _read_font_meta now returns a list of tuples (one per font in TTC)
+                if meta_list:
+                    for meta in meta_list:
+                        path, font_index, fams, styles, ps, weight, _flags = meta
+                        entries.append((path, font_index, fams, styles, ps, weight))
+                        fam_set = set(fams) | ({ps} if ps else set())
+                        if fam_set & prebake_fams:
+                            prebake_key = list(fam_set & prebake_fams)[0]
+                            # For prebake candidates, compute flags lazily now (may need to reopen)
+                            flags = {}
+                            try:
+                                flags_meta_list = self._read_font_meta(path, True)
+                                if flags_meta_list:
+                                    # Find the matching font_index entry
+                                    for fm in flags_meta_list:
+                                        if fm[1] == font_index:
+                                            flags = fm[-1]
+                                            break
+                            except Exception:
+                                pass
+                            prebaked.setdefault(prebake_key, []).append(
+                                {"path": str(path), "font_index": font_index, "styles": styles, "ps": ps, "weight": weight, "flags": flags}
+                            )
                 if time.time() - start > budget_seconds:
                     partial = True
                     break
@@ -523,10 +566,11 @@ class FontCache:
 
     def _save_cache(
         self,
-        entries: list[tuple[Path, list[str], list[str], str, int]],
+        entries: list[tuple[Path, int, list[str], list[str], str, int]],
         prebaked: dict[str, list[dict]],
         partial: bool,
     ) -> None:
+        """Save font cache to disk, including font_index for TTC collections."""
         cache_path = self._cache_path()
         dirs = [str(d) for d in self._font_dirs()]
         payload = {
@@ -536,13 +580,14 @@ class FontCache:
             "fonts": [
                 {
                     "path": str(p),
+                    "font_index": font_index,  # Now stores font index for TTC collections
                     "mtime": int(p.stat().st_mtime),
                     "families": fams,
                     "styles": styles,
                     "ps": ps,
                     "weight": weight,
                 }
-                for (p, fams, styles, ps, weight) in entries
+                for (p, font_index, fams, styles, ps, weight) in entries
             ],
             "prebaked": prebaked,
             "partial": partial,
@@ -603,24 +648,26 @@ class FontCache:
         self._load_fc_cache()
         found: list[str] = []
         seen_fams: set[str] = set()
-        for path, fams, styles, ps, _weight in self._fc_cache:
+        for path, font_index, fams, styles, ps, _weight in self._fc_cache:
             if limit and len(found) >= limit:
                 break
             try:
-                if path in self._coverage_cache:
-                    cover = self._coverage_cache[path]
+                # Cache key includes font_index for TTC collections
+                cache_key = (path, font_index)
+                if cache_key in self._coverage_cache:
+                    cover = self._coverage_cache[cache_key]
                 else:
-                    # Load first face to inspect cmap (lazy to reduce memory)
-                    if path.suffix.lower() == ".ttc":
+                    # Load specific face to inspect cmap (using font_index for TTC)
+                    if path.suffix.lower() in {".ttc", ".otc"}:
                         from fontTools.ttLib import TTCollection
 
                         coll = TTCollection(path, lazy=True)
-                        tt = coll.fonts[0]
+                        tt = coll.fonts[font_index] if font_index < len(coll.fonts) else coll.fonts[0]
                     else:
                         tt = TTFont(path, lazy=True)
                     cmap = tt.getBestCmap() or {}
                     cover = set(cmap.keys())
-                    self._coverage_cache[path] = cover
+                    self._coverage_cache[cache_key] = cover
                 if not (codepoints & cover):
                     continue
                 fam = (fams[0] if fams else "") or ps or path.stem
@@ -760,9 +807,9 @@ class FontCache:
     ) -> tuple[Path, int] | None:
         """Strict match: family must exist; weight/style must match token sets; no substitution.
 
-        This version inspects TTC collections to pick the face whose style tokens
-        best match the requested weight/style/stretch (prevents grabbing Regular
-        when Condensed or other faces exist)."""
+        TTC-fix: Cache now stores each font face from TTC collections as a separate entry
+        with its font_index, so we can directly return the cached font_index without
+        needing to re-scan the TTC file at runtime."""
         self._load_fc_cache()
         fam_norm = font_family.strip().lower()
         ps_norm = ps_hint.strip().lower() if ps_hint else None
@@ -770,50 +817,11 @@ class FontCache:
             self._build_style_label(weight, style, stretch)
         )
 
-        best_candidate: tuple[Path, str] | None = None
+        # best_candidate now stores (path, style_str, font_index) since cache has individual TTC entries
+        best_candidate: tuple[Path, str, int] | None = None
         best_score: float | None = None
 
-        def pick_face(path: Path, preferred_style: str | None) -> tuple[Path, int] | None:
-            try:
-                if path.suffix.lower() == ".ttc":
-                    from fontTools.ttLib import TTCollection
-
-                    coll = TTCollection(path)
-                    best_idx = 0
-                    best_face_score: float | None = None
-                    for idx, face in enumerate(coll.fonts):
-                        name_table = face["name"]
-                        subfam = name_table.getName(2, 3, 1) or name_table.getName(
-                            2, 1, 0
-                        )
-                        psname = name_table.getName(6, 3, 1) or name_table.getName(
-                            6, 1, 0
-                        )
-                        label = (subfam.toUnicode() if subfam else "") or ""
-                        ps_label = (psname.toUnicode() if psname else "") or ""
-                        tokens = self._style_token_set(label) | self._style_token_set(
-                            ps_label
-                        )
-                        if desired_style_tokens and not desired_style_tokens.issubset(
-                            tokens
-                        ):
-                            continue
-                        score = self._style_match_score(
-                            label or ps_label or preferred_style or "",
-                            weight,
-                            style,
-                            stretch,
-                        )
-                        if best_face_score is None or score < best_face_score:
-                            best_face_score = score
-                            best_idx = idx
-                    if best_face_score is not None:
-                        return (path, best_idx)
-                return (path, 0)
-            except Exception:
-                return (path, 0)
-
-        for path, fams, styles, ps, weight_val in self._fc_cache:
+        for path, font_index, fams, styles, ps, weight_val in self._fc_cache:
             fam_hit = (
                 any(
                     fam_norm == f or fam_norm.lstrip(".") == f.lstrip(".") for f in fams
@@ -837,12 +845,12 @@ class FontCache:
                     pass
                 if best_score is None or score < best_score:
                     best_score = score
-                    best_candidate = (path, st)
+                    # Now store font_index from cache entry for TTC collections
+                    best_candidate = (path, st, font_index)
 
         if best_candidate:
-            picked = pick_face(best_candidate[0], best_candidate[1])
-            if picked:
-                return picked
+            # Return path and cached font_index directly (no need to re-scan TTC)
+            return (best_candidate[0], best_candidate[2])
         return None
 
     def _match_font_with_fc(
@@ -4974,12 +4982,7 @@ def convert_svg_text_to_paths(
 
 
 def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) -> None:
-    """Compare input and output SVGs using sbb-comparer.cjs"""
-    sbb_comparer_script = Path(__file__).parent.parent / "SVG-BBOX" / "sbb-comparer.cjs"
-    if not sbb_comparer_script.exists():
-        print(f"  ⚠️  sbb-comparer.cjs not found at {sbb_comparer_script}")
-        return
-
+    """Compare input and output SVGs using sbb-compare (npm svg-bbox)"""
     try:
         out_dir = output_path.parent
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -4994,9 +4997,10 @@ def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) ->
             rel_input = input_path.resolve()
             rel_output = output_path.resolve()
             rel_diff = diff_output
+        # Use npx to run sbb-compare from npm svg-bbox package
         cmd = [
-            "node",
-            str(sbb_comparer_script),
+            "npx",
+            "sbb-compare",  # npm svg-bbox 1.1.1 renamed sbb-comparer to sbb-compare
             str(rel_input),
             str(rel_output),
             "--out-diff",
@@ -5007,6 +5011,8 @@ def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) ->
             "4",
             "--json",
         ]
+        if not open_html:
+            cmd.append("--no-html")
 
         cwd = project_root
         print(f"Running comparison: {' '.join(cmd)}")
@@ -5042,28 +5048,24 @@ def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) ->
             print(f"  ✗ Comparison failed with exit code {result.returncode}")
 
     except Exception as e:
-        print(f"  ⚠️  Failed to run sbb-comparer: {e}")
+        print(f"  ⚠️  Failed to run sbb-compare: {e}")
 
 
 def get_visual_bboxes(svg_path: Path, elem_ids: list = None) -> dict:
-    """Get visual bboxes for elements in SVG using sbb-getbbox.cjs"""
-    sbb_getbbox_script = Path(__file__).parent.parent / "SVG-BBOX" / "sbb-getbbox.cjs"
-    if not sbb_getbbox_script.exists():
-        print(f"  ⚠️  sbb-getbbox.cjs not found at {sbb_getbbox_script}")
-        return {}
-
+    """Get visual bboxes for elements in SVG using sbb-getbbox (npm svg-bbox)"""
     try:
         json_output_path = svg_path.with_suffix(f".bbox_{uuid.uuid4()}.json")
 
-        cmd = ["node", str(sbb_getbbox_script), str(svg_path)]
+        # Use npx to run sbb-getbbox from npm svg-bbox package
+        cmd = ["npx", "sbb-getbbox", str(svg_path)]
 
         if elem_ids:
             cmd.extend(elem_ids)
 
         cmd.extend(["--json", str(json_output_path), "--ignore-vbox"])
 
-        cwd = sbb_getbbox_script.parent.parent
-        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
+        project_root = Path(__file__).parent.parent
+        subprocess.run(cmd, cwd=project_root, check=True, capture_output=True)
 
         if json_output_path.exists():
             with open(json_output_path, "r") as f:
