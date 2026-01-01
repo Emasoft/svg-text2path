@@ -1689,9 +1689,20 @@ def text_to_path_rust_style(
             f"DEBUG symbol cmap: len={len(cmap)} sample_keys={list(cmap.keys())[:5] if cmap else []} has_F04E={0xF04E in cmap}"
         )
     try:
-        glyph_set_primary = ttfont.getGlyphSet()
-    except Exception:
-        glyph_set_primary = None
+        # Pass variation settings to getGlyphSet for correct variable font instance
+        # This uses fontTools' built-in interpolation, not instancer (which was tested and failed)
+        if variation_settings:
+            location = {k: v for k, v in variation_settings}
+            glyph_set_primary = ttfont.getGlyphSet(location=location)
+            print(f"    ✓ Using glyph set at location: {location}")
+        else:
+            glyph_set_primary = ttfont.getGlyphSet()
+    except Exception as e:
+        print(f"  ⚠️ getGlyphSet failed (trying without location): {e}")
+        try:
+            glyph_set_primary = ttfont.getGlyphSet()
+        except Exception:
+            glyph_set_primary = None
 
     symbol_families = {"webdings", "wingdings", "wingdings 2", "wingdings 3", "symbol"}
 
@@ -2687,10 +2698,19 @@ def text_to_path_rust_style(
             # Get direction and script for each character
             char_props = []  # List of (direction, script)
     
+            # Check if text contains Arabic letters (AL) - for Arabic number handling
+            has_arabic_letters = any(
+                unicodedata.bidirectional(c) == "AL" for c in text_content
+            )
+
             for char in text_content:
                 # Determine direction
                 bidi_class = unicodedata.bidirectional(char)
                 if bidi_class in ("R", "AL", "RLE", "RLO"):
+                    direction = "RTL"
+                # Treat Arabic Numbers (AN) as RTL in Arabic text context
+                # AN digits flow LTR numerically but are part of RTL paragraph
+                elif bidi_class == "AN" and has_arabic_letters:
                     direction = "RTL"
                 elif bidi_class in ("L", "LRE", "LRO"):
                     direction = "LTR"
@@ -2765,7 +2785,7 @@ def text_to_path_rust_style(
         if variation_settings:
             try:
                 hb_font.set_variations(dict(variation_settings))
-                # print(f"    ✓ Applied variations: {variation_settings}")
+                print(f"    ✓ Applied variations: {variation_settings}")
             except Exception as e:
                 print(f"  ⚠️  Failed to apply font variations {variation_settings}: {e}")
     
@@ -2833,8 +2853,12 @@ def text_to_path_rust_style(
     
     import bisect
     
-    # Precompute glyph set for primary
-    glyph_set_primary = ttfont.getGlyphSet()
+    # Precompute glyph set for primary (with variation location if applicable)
+    if variation_settings:
+        location = {k: v for k, v in variation_settings}
+        glyph_set_primary = ttfont.getGlyphSet(location=location)
+    else:
+        glyph_set_primary = ttfont.getGlyphSet()
     # Build global byte offsets for dx/dy mapping
     byte_offsets_global = [0]
     acc_global = 0
@@ -3216,6 +3240,12 @@ def text_to_path_rust_style(
             line_anchor_offset = 0.0 if align_dir == "RTL" else -line_width
         else:
             line_anchor_offset = -line_width if align_dir == "RTL" else 0.0
+
+        # Debug for Arabic text (text44 scenario)
+        has_arabic = any("\u0600" <= c <= "\u06ff" for c in text_content[:20]) if text_content else False
+        if DEBUG_ENABLED and has_arabic:
+            print(f"DEBUG ANCHOR: anchor={text_anchor} base_dir={base_dir} align_dir={align_dir} line_dirs={line_dirs} line_width={line_width:.2f} offset={line_anchor_offset:.2f}")
+            print(f"DEBUG POS: x={x:.2f} y={y:.2f} current_x={x + line_anchor_offset:.2f}")
     
         line_baseline = line_chunks[0].get("line_y", y) if line_chunks else y
     
@@ -3269,7 +3299,7 @@ def text_to_path_rust_style(
             chunk_width = _chunk_width(chunk)
             chunk_dir = chunk.get("direction", "LTR")
     
-            if "No javascript" in text_content:
+            if DEBUG_ENABLED and "No javascript" in text_content:
                 print(
                     f"DEBUG LAYOUT: font={font_family} x={x} line_width={line_width} anchor={text_anchor} offset={line_anchor_offset} dir={chunk_dir} chunk_width={chunk_width}"
                 )
@@ -3318,7 +3348,7 @@ def text_to_path_rust_style(
             #     chunk_cursor = chunk_width # WRONG if chunk_origin is already shifted
     
             # For mixed-direction lines, HarfBuzz already outputs RTL glyphs in visual order.
-            # For pure RTL lines, keep legacy right-edge placement.
+            # For pure RTL lines, use right-edge placement with reversed iteration.
             if chunk_dir == "RTL" and not mixed_dir:
                 chunk_origin = current_x + chunk_width
             else:
@@ -3331,36 +3361,52 @@ def text_to_path_rust_style(
                     acc_local += len(ch.encode("utf-8"))
                     local_byte_offsets.append(acc_local)
 
-            for info, pos in zip(seg_infos, seg_positions):
+            # For pure RTL text, reverse iteration order to process rightmost glyph first
+            # HarfBuzz outputs glyphs in visual left-to-right order, but our RTL positioning
+            # logic (chunk_cursor -= adv) expects right-to-left iteration
+            if chunk_dir == "RTL" and not mixed_dir:
+                glyph_pairs = list(zip(seg_infos, seg_positions))[::-1]
+            else:
+                glyph_pairs = list(zip(seg_infos, seg_positions))
+
+            for info, pos in glyph_pairs:
                 # HarfBuzz returns codepoint indices (not byte indices) when using add_str with Python strings
                 cluster = info.cluster
                 char_idx_local = max(
                     0, bisect.bisect_right(local_byte_offsets, cluster) - 1
                 )
                 char_idx = chunk["start"] + char_idx_local
+
                 current_dx = (
                     dx_list[char_idx] if dx_list and char_idx < len(dx_list) else 0.0
                 )
                 current_dy = (
                     dy_list[char_idx] if dy_list and char_idx < len(dy_list) else 0.0
                 )
-    
+
                 # Calculate advance width for this glyph
                 add_spacing = letter_spacing
                 if text_content[char_idx : char_idx + 1] == " ":
                     add_spacing += word_spacing
                 adv = (pos.x_advance * seg_scale) + add_spacing
-    
+
                 # Apply dx to cursor (accumulate shift)
+                # SVG dx is an absolute x-axis shift: positive = right, negative = left
+                # This applies regardless of text direction
                 chunk_cursor += current_dx
-    
+
                 if chunk_dir == "RTL" and not mixed_dir:
                     chunk_cursor -= adv
                     glyph_origin = chunk_origin + chunk_cursor
                 else:
                     glyph_origin = chunk_origin + chunk_cursor
                     chunk_cursor += adv
-    
+
+                # Debug all glyphs for char_idx 4 (the multi-glyph Arabic char) to verify fix
+                has_arabic_debug = any("\u0600" <= c <= "\u06ff" for c in text_content[:5]) if text_content else False
+                if DEBUG_ENABLED and has_arabic_debug and char_idx == 4:
+                    print(f"DEBUG GLYPH[{char_idx}]: char='{text_content[char_idx]}' dx={current_dx:.2f} adv={adv:.2f} chunk_origin={chunk_origin:.2f} chunk_cursor={chunk_cursor:.2f} glyph_origin={glyph_origin:.2f}")
+
                 glyph_id = info.codepoint
                 try:
                     glyph_name = seg_ttfont.getGlyphName(glyph_id)
@@ -4381,12 +4427,20 @@ def convert_svg_text_to_paths(
                         line_text_parts: list[str] = []
                         dx_list_line: list[float] = []
                         dy_list_line: list[float] = []
+                        # Detect if children have consistent text-anchor override
+                        child_anchors: set[str] = set()
                         _append_text_with_offsets(
                             line_span.text, [], [], line_text_parts, dx_list_line, dy_list_line
                         )
                         for child in list(line_span):
                             if not _is_tspan(child):
                                 continue
+                            # Collect child anchor for override detection
+                            child_anchor_m = re.search(
+                                r"text-anchor:\s*(start|middle|end)", child.get("style", "")
+                            )
+                            if child_anchor_m:
+                                child_anchors.add(child_anchor_m.group(1))
                             dx_vals = (
                                 _parse_num_list(child.get("dx", ""))
                                 if "dx" in child.attrib
@@ -4410,14 +4464,42 @@ def convert_svg_text_to_paths(
                         line_x = line_span.get("x") or base_x
                         line_y = line_span.get("y") or base_y
 
+                        # Use child anchor if all children have same anchor override
+                        effective_anchor = parent_anchor
+                        if len(child_anchors) == 1:
+                            effective_anchor = next(iter(child_anchors))
+                        if DEBUG_ENABLED and elem_id == "text44":
+                            print(f"DEBUG FLATTEN: line_idx={line_idx} child_anchors={child_anchors} parent_anchor={parent_anchor} effective_anchor={effective_anchor}")
+
                         temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
                         temp_text.set("x", str(line_x))
                         temp_text.set("y", str(line_y))
+                        # Chrome behavior: when ALL children have the same text-anchor
+                        # override (e.g., all "end"), Chrome uses that for positioning
+                        # instead of the parent's text-anchor. The child anchor wins.
+                        # We must update BOTH style and attribute because get_attr()
+                        # checks style first (style takes precedence over attribute).
+                        anchor_to_use = effective_anchor if effective_anchor else parent_anchor
                         if parent_style:
-                            temp_text.set("style", parent_style)
-                        if parent_anchor:
-                            temp_text.set("text-anchor", parent_anchor)
+                            # Replace text-anchor in style with the effective anchor
+                            modified_style = re.sub(
+                                r"text-anchor:\s*(start|middle|end)",
+                                f"text-anchor:{anchor_to_use}",
+                                parent_style,
+                            )
+                            temp_text.set("style", modified_style)
+                        if anchor_to_use:
+                            temp_text.set("text-anchor", anchor_to_use)
+                        # Preserve direction attribute from parent for RTL handling
+                        if "direction" in text_elem.attrib:
+                            temp_text.set("direction", text_elem.get("direction"))
                         temp_text.text = line_text
+
+                        if DEBUG_ENABLED and elem_id == "text44":
+                            # Show non-zero dx values with their positions
+                            nonzero_dx = [(i, v) for i, v in enumerate(dx_list_line) if v != 0.0]
+                            print(f"DEBUG FLATTEN CALL: line_text='{line_text[:30]}...' anchor={effective_anchor} direction={text_elem.get('direction')} dx_len={len(dx_list_line)}")
+                            print(f"DEBUG FLATTEN DX: nonzero_dx={nonzero_dx[:10]}...")
 
                         result_line = text_to_path_rust_style(
                             temp_text,
@@ -4822,7 +4904,7 @@ def convert_svg_text_to_paths(
                                     0.0 if leaf_anchor != line_anchor else parent_shift
                                 )
 
-                                if elem_id in ["text39", "text53", "text54"]:
+                                if DEBUG_ENABLED and elem_id in ["text39", "text53", "text54"]:
                                     print(
                                         f"DEBUG FINAL: id={elem_id} anchor={line_anchor} leaf_anchor={leaf_anchor} width={width} total_width={total_width} parent_shift={parent_shift} eff_shift={effective_parent_shift} base_x={line_base_x} x={line_base_x + effective_parent_shift + cursor + anchor_shift}"
                                     )
