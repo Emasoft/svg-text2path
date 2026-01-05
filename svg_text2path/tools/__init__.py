@@ -6,11 +6,43 @@ This subpackage provides:
 - External tool invocation utilities
 """
 
-from svg_text2path.tools.svg_bbox import compare_svgs, get_bounding_boxes
-from svg_text2path.tools.installer import ensure_tool_installed
+from svg_text2path.tools.external import (
+    CommandResult,
+    check_git_installed,
+    check_node_installed,
+    check_npm_installed,
+    run_command,
+    which,
+)
+from svg_text2path.tools.installer import (
+    ensure_tool_installed,
+    get_tools_dir,
+    is_tool_available,
+    list_installed_tools,
+)
+from svg_text2path.tools.svg_bbox import (
+    BoundingBox,
+    ComparisonResult,
+    compare_svgs,
+    get_bounding_boxes,
+)
 
 __all__ = [
+    # external.py
+    "CommandResult",
+    "check_git_installed",
+    "check_node_installed",
+    "check_npm_installed",
+    "run_command",
+    "which",
+    # installer.py
+    "ensure_tool_installed",
+    "get_tools_dir",
+    "is_tool_available",
+    "list_installed_tools",
+    # svg_bbox.py
+    "BoundingBox",
+    "ComparisonResult",
     "compare_svgs",
     "get_bounding_boxes",
-    "ensure_tool_installed",
 ]
