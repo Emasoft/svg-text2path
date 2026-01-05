@@ -3538,10 +3538,14 @@ def text_to_path_rust_style(
     
                     # Clamp distance to path length to avoid errors
                     dist_along_path = max(0.0, min(path_len, dist_along_path))
-    
+
+                    # Convert absolute distance to fraction (0-1) for svg.path API
+                    path_fraction = dist_along_path / path_len if path_len > 0 else 0.0
+                    path_fraction = max(0.0, min(1.0, path_fraction))
+
                     try:
-                        base_point = path_obj.point(dist_along_path)
-                        tangent_unit = path_obj.tangent(dist_along_path)
+                        base_point = path_obj.point(path_fraction)
+                        tangent_unit = path_obj.tangent(path_fraction)
                     except Exception:
                         # Fallback if point/tangent fails even after clamping
                         base_point = complex(0, 0)
@@ -4321,6 +4325,7 @@ def convert_svg_text_to_paths(
                     temp_id_counter += 1
 
                 leaf_items = []
+                dx_items = []  # Deferred dx tspans to apply parent_shift later
 
                 # Resolve parent anchor once
                 def _get_attr_local(elem, key, default=None):
@@ -4331,8 +4336,11 @@ def convert_svg_text_to_paths(
                     return elem.get(key, default)
 
                 parent_anchor = _get_attr_local(text_elem, "text-anchor", None)
-                if any("dx" in t.attrib for t in tspans):
-                    parent_anchor = "start"
+                # NOTE: Removed forced parent_anchor="start" for dx tspans.
+                # This was breaking text44 where parent has text-anchor:middle
+                # but children have text-anchor:end. The parent anchor affects
+                # how the entire line is positioned, and forcing it to "start"
+                # destroyed the centering semantics.
                 if not parent_anchor:
                     # check style on text_elem
                     style_anchor_match = re.search(
@@ -4400,6 +4408,16 @@ def convert_svg_text_to_paths(
                         if child.get("style") and not _style_matches_parent(
                             child.get("style", "")
                         ):
+                            can_flatten_dx = False
+                            break
+                        # Check if child has different text-anchor than parent
+                        # This prevents flattening when positioning semantics differ
+                        child_anchor_m = re.search(
+                            r"text-anchor:\s*(start|middle|end)", child.get("style", "")
+                        )
+                        if child_anchor_m and child_anchor_m.group(1) != parent_anchor:
+                            # Different anchor means each segment positions differently
+                            # Flattening would lose this per-segment anchor behavior
                             can_flatten_dx = False
                             break
                         if "dx" in child.attrib or "dy" in child.attrib:
@@ -4591,38 +4609,58 @@ def convert_svg_text_to_paths(
                     if text_content.strip() and not has_child_tspan:
                         anchor_resolved = span_anchor(span, parent_anchor)
                         if (dx_list_span or dy_list_span) and not force_wrap:
-                            # Directly convert spans with explicit per-glyph offsets to avoid
-                            # anchoring explosions on RTL text with large dx values.
-                            temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
-                            temp_text.set("x", str(cx))
-                            temp_text.set("y", str(cy))
+                            # DEFERRED CONVERSION: Don't convert inline - add to dx_items
+                            # to apply parent_shift later (fixes text44 middle anchor issue).
+                            first_dx = dx_list_span[0] if dx_list_span else 0.0
+                            cx += first_dx  # Position tspan at current + first_dx
+                            # Zero out first dx (it was used for tspan position), keep indices aligned
+                            remaining_dx = [0.0] + dx_list_span[1:] if dx_list_span else None
+
+                            # Measure width to update cursor for following siblings
+                            temp_measure = ET.Element("{http://www.w3.org/2000/svg}text")
+                            temp_measure.set("x", "0")
+                            temp_measure.set("y", "0")
                             if span_style:
-                                temp_text.set("style", strip_anchor(span_style))
-                            temp_text.set("text-anchor", "start")
+                                temp_measure.set("style", span_style)
+                            temp_measure.set("text-anchor", "start")
                             if "direction" in text_elem.attrib:
-                                temp_text.set("direction", text_elem.get("direction"))
-                            temp_text.text = text_content
-                            result_span = text_to_path_rust_style(
-                                temp_text,
+                                temp_measure.set("direction", text_elem.get("direction"))
+                            temp_measure.text = text_content
+                            measure_result = text_to_path_rust_style(
+                                temp_measure,
                                 font_cache,
-                                path_obj,
-                                path_start_offset=p_offset,
+                                None,
+                                path_start_offset=0.0,
                                 precision=precision,
-                                dx_list=dx_list_span,
+                                dx_list=remaining_dx,
                                 dy_list=dy_list_span,
                             )
-                            if result_span is not None:
-                                path_elem, width = result_span
-                                if "transform" in path_elem.attrib:
-                                    del path_elem.attrib["transform"]
-                                path_elem.set("id", f"{elem_id}_tspan{temp_id_counter}")
-                                temp_id_counter += 1
-                                group_elem.append(path_elem)
-                                tspan_converted += 1
-                                cx += width
-                            elif elem_id == "text4":
-                                dbg("DEBUG text4: result_span None in process_span branch (dx/dy)")
-                            # continue processing siblings without returning early
+                            dx_width = measure_result[1] if measure_result else 0.0
+
+                            # Store for deferred conversion with parent_shift
+                            dx_items.append({
+                                "text": text_content,
+                                "x": cx,
+                                "y": cy,
+                                "anchor": anchor_resolved,
+                                "style": span_style,
+                                "dx_list": remaining_dx,
+                                "dy_list": dy_list_span,
+                                "p_offset": p_offset,
+                                "width": dx_width,
+                                "first_dx": first_dx,
+                            })
+
+                            # Debug dx/anchor positioning for text44
+                            if elem_id == "text44":
+                                print(f"DEBUG DX: tspan '{text_content[:10]}' cx={cx:.2f} first_dx={first_dx:.2f} width={dx_width:.2f} anchor={anchor_resolved}")
+
+                            # For text-anchor:end, the x position IS the anchor (end) point.
+                            # After rendering, the current position stays at the anchor,
+                            # NOT at anchor + width. The next sibling's dx is relative to this anchor.
+                            # For text-anchor:start/middle, advance normally.
+                            if anchor_resolved != "end":
+                                cx += dx_width
                         else:
                             leaf_items.append(
                                 {
@@ -4638,6 +4676,33 @@ def convert_svg_text_to_paths(
                                     "p_offset": p_offset,
                                 }
                             )
+                            # CRITICAL: Update cx after adding to leaf_items!
+                            # Without this, subsequent dx tspans use wrong cursor position.
+                            # Measure width to update cursor for following siblings.
+                            temp_measure = ET.Element("{http://www.w3.org/2000/svg}text")
+                            temp_measure.set("x", "0")
+                            temp_measure.set("y", "0")
+                            if span_style:
+                                temp_measure.set("style", span_style)
+                            temp_measure.set("text-anchor", "start")
+                            if "direction" in text_elem.attrib:
+                                temp_measure.set("direction", text_elem.get("direction"))
+                            temp_measure.text = text_content
+                            measure_result = text_to_path_rust_style(
+                                temp_measure,
+                                font_cache,
+                                None,
+                                path_start_offset=0.0,
+                                precision=precision,
+                            )
+                            if measure_result is not None:
+                                _, leaf_width = measure_result
+                                # For text-anchor:end (RTL end-aligned), the cursor stays
+                                # at the anchor point after rendering. The next sibling's
+                                # dx is relative to this anchor, not to the text extent.
+                                # For start/middle, advance cursor normally.
+                                if anchor_resolved != "end":
+                                    cx += leaf_width
 
                     # Recurse into children
                     for child in list(span):
@@ -4844,6 +4909,9 @@ def convert_svg_text_to_paths(
                             line_anchor = parent_anchor
 
                             # Measure widths with anchor=start to avoid double shifting
+                            # IMPORTANT: Do NOT include transform when measuring width!
+                            # The anchor_shift needs INTRINSIC width, not scaled width.
+                            # The transform will be applied later when generating the final path.
                             measured: list[tuple[dict, float]] = []  # (leaf, width)
                             for li in line_items:
                                 temp_measure = ET.Element(
@@ -4851,10 +4919,7 @@ def convert_svg_text_to_paths(
                                 )
                                 temp_measure.set("x", "0")
                                 temp_measure.set("y", "0")
-                                if "transform" in text_elem.attrib:
-                                    temp_measure.set(
-                                        "transform", text_elem.get("transform")
-                                    )
+                                # NOTE: Intentionally NOT setting transform here - we need intrinsic width
                                 if li["style"]:
                                     temp_measure.set("style", li["style"])
                                 temp_measure.set("text-anchor", "start")
