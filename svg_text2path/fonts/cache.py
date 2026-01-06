@@ -13,6 +13,7 @@ Key features:
 - fontconfig integration for browser-like font selection
 """
 
+import contextlib
 import json
 import os
 import re
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -39,14 +40,17 @@ class MissingFontError(Exception):
 class FontCache:
     """Cache loaded fonts using fontconfig for proper font matching."""
 
-    def __init__(self):
-        self._fonts: dict[
-            str, tuple[TTFont, bytes, int]
-        ] = {}  # Cache: font_spec -> (TTFont, bytes, face_index)
-        self._coverage_cache: dict[tuple[Path, int], set[int]] = {}  # (path, font_index) -> codepoints
+    def __init__(self) -> None:
+        # Cache: font_spec -> (TTFont, bytes, face_index)
+        self._fonts: dict[str, tuple[TTFont, bytes, int]] = {}
+        # (path, font_index) -> codepoints
+        self._coverage_cache: dict[tuple[Path, int], set[int]] = {}
 
     def _parse_inkscape_spec(self, inkscape_spec: str) -> tuple[str, str | None]:
-        """Parse Inkscape font specification like 'Futura, Medium' or '.New York, Italic'."""
+        """Parse Inkscape font specification.
+
+        Examples: 'Futura, Medium' or '.New York, Italic'.
+        """
         s = inkscape_spec.strip().strip("'\"")
         if "," in s:
             family, rest = s.split(",", 1)
@@ -73,14 +77,16 @@ class FontCache:
         }
         return weight_map.get(weight)
 
-    # TTC-fix applied 2025-12-31: Cache now stores ALL fonts from TTC/OTC collections.
-    # This fixes fonts like "Futura Medium Italic" (stored in Futura.ttc) being found.
-    # The fix uses 6-tuple with font_index and iterates all fonts in TTC/OTC files.
-    # Tested: improved text3.svg (12.35%→2.94%) and text54.svg (12.89%→0.78%).
-    _fc_cache: list[tuple[Path, int, list[str], list[str], str, int]] | None = None  # (path, font_index, fams, styles, ps, weight)
+    # TTC-fix applied 2025-12-31: Cache now stores ALL fonts from TTC/OTC
+    # collections. This fixes fonts like "Futura Medium Italic" being found.
+    # The fix uses 6-tuple with font_index and iterates all fonts in TTC/OTC.
+    # Tested: improved text3.svg (12.35%->2.94%) and text54.svg (12.89%->0.78%).
+    # (path, font_index, fams, styles, ps, weight)
+    _fc_cache: list[tuple[Path, int, list[str], list[str], str, int]] | None = None
     _cache_file: Path | None = None
-    _cache_version: int = 4  # v4: stores all fonts from TTC collections with font_index
-    _prebaked: dict[str, list[dict]] | None = None
+    # v4: stores all fonts from TTC collections with font_index
+    _cache_version: int = 4
+    _prebaked: dict[str, list[dict[str, object]]] | None = None
     _cache_partial: bool = False
 
     def _font_dirs(self) -> list[Path]:
@@ -119,9 +125,16 @@ class FontCache:
             self._cache_file = base / "font_cache.json"
         return self._cache_file
 
-    def _load_persistent_cache(self) -> tuple[
-        list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool
-    ] | None:
+    def _load_persistent_cache(
+        self,
+    ) -> (
+        tuple[
+            list[tuple[Path, int, list[str], list[str], str, int]],
+            dict[str, list[dict[str, object]]],
+            bool,
+        ]
+        | None
+    ):
         """Load cached font metadata if present and fresh."""
         cache_path = self._cache_path()
         if not cache_path.exists():
@@ -135,7 +148,10 @@ class FontCache:
                 for d in data.get("dirs", [])
             }
             for d in dirs_state:
-                if not Path(d).exists() or int(Path(d).stat().st_mtime) != dirs_state[d]:
+                if (
+                    not Path(d).exists()
+                    or int(Path(d).stat().st_mtime) != dirs_state[d]
+                ):
                     return None
             entries: list[tuple[Path, int, list[str], list[str], str, int]] = []
             for rec in data.get("fonts", []):
@@ -162,7 +178,7 @@ class FontCache:
             return None
         return None
 
-    def _spinner(self, message: str, stop_event: threading.Event):
+    def _spinner(self, message: str, stop_event: threading.Event) -> None:
         """Simple console spinner."""
         symbols = "|/-\\"
         idx = 0
@@ -174,28 +190,37 @@ class FontCache:
         sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
         sys.stdout.flush()
 
-    def _read_font_meta(self, path: Path, need_flags: bool) -> list[tuple[Path, int, list[str], list[str], str, int, dict]] | None:
+    def _read_font_meta(
+        self, path: Path, need_flags: bool
+    ) -> list[tuple[Path, int, list[str], list[str], str, int, dict[str, bool]]] | None:
         """Read font metadata from a font file.
 
-        For TTC/OTC collections, returns ALL fonts in the collection (not just the first).
-        This is critical for fonts like Futura.ttc which contain multiple styles.
+        For TTC/OTC collections, returns ALL fonts in the collection
+        (not just the first). This is critical for fonts like Futura.ttc
+        which contain multiple styles.
 
-        Returns list of tuples: (path, font_index, families, styles, psname, weight, flags)
+        Returns:
+            List of tuples: (path, font_index, families, styles, psname, weight, flags)
         """
         try:
             suffix = path.suffix.lower()
             if suffix not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
                 return None
 
-            results: list[tuple[Path, int, list[str], list[str], str, int, dict]] = []
+            results: list[
+                tuple[Path, int, list[str], list[str], str, int, dict[str, bool]]
+            ] = []
 
             # For TTC/OTC collections, iterate ALL fonts to capture all styles
             if suffix in {".ttc", ".otc"}:
                 from fontTools.ttLib import TTCollection
+
                 try:
                     coll = TTCollection(path, lazy=True)
                     for font_index, tt in enumerate(coll.fonts):
-                        meta = self._extract_single_font_meta(path, font_index, tt, need_flags)
+                        meta = self._extract_single_font_meta(
+                            path, font_index, tt, need_flags
+                        )
                         if meta:
                             results.append(meta)
                 except Exception:
@@ -217,7 +242,7 @@ class FontCache:
 
     def _extract_single_font_meta(
         self, path: Path, font_index: int, tt: TTFont, need_flags: bool
-    ) -> tuple[Path, int, list[str], list[str], str, int, dict] | None:
+    ) -> tuple[Path, int, list[str], list[str], str, int, dict[str, bool]] | None:
         """Extract metadata from a single font face."""
         try:
             names = tt["name"]
@@ -238,24 +263,34 @@ class FontCache:
                     weight = int(tt["OS/2"].usWeightClass)
             except Exception:
                 pass
-            flags = {}
+            flags: dict[str, bool] = {}
             if need_flags:
-                # Light coverage flags (avoid loading later): basic Latin, Latin-1, CJK, RTL
+                # Light coverage flags (avoid loading later): Latin, Latin-1, CJK, RTL
                 flags = {"latin": False, "latin1": False, "cjk": False, "rtl": False}
                 try:
                     cmap = tt.getBestCmap() or {}
                     codes = set(cmap.keys())
                     flags["latin"] = any(0x0041 <= c <= 0x007A for c in codes)
                     flags["latin1"] = any(0x00A0 <= c <= 0x00FF for c in codes)
-                    flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(0x0590 <= c <= 0x05FF for c in codes)
-                    flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(0x3040 <= c <= 0x30FF for c in codes)
+                    flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(
+                        0x0590 <= c <= 0x05FF for c in codes
+                    )
+                    flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(
+                        0x3040 <= c <= 0x30FF for c in codes
+                    )
                 except Exception:
                     pass
             return (path, font_index, fams, styles, psname, weight, flags)
         except Exception:
             return None
 
-    def _build_cache_entries(self) -> tuple[list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool]:
+    def _build_cache_entries(
+        self,
+    ) -> tuple[
+        list[tuple[Path, int, list[str], list[str], str, int]],
+        dict[str, list[dict[str, object]]],
+        bool,
+    ]:
         """Build font cache entries, including ALL fonts from TTC/OTC collections."""
         dirs = self._font_dirs()
         font_files: set[Path] = set()
@@ -270,7 +305,7 @@ class FontCache:
 
         # Now stores 6-tuples: (path, font_index, fams, styles, ps, weight)
         entries: list[tuple[Path, int, list[str], list[str], str, int]] = []
-        prebaked: dict[str, list[dict]] = {}
+        prebaked: dict[str, list[dict[str, object]]] = {}
         prebake_fams = {
             "arial",
             "helvetica",
@@ -304,8 +339,8 @@ class FontCache:
                         fam_set = set(fams) | ({ps} if ps else set())
                         if fam_set & prebake_fams:
                             prebake_key = list(fam_set & prebake_fams)[0]
-                            # For prebake candidates, compute flags lazily now (may need to reopen)
-                            flags = {}
+                            # Compute flags lazily for prebake candidates
+                            flags: dict[str, bool] = {}
                             try:
                                 flags_meta_list = self._read_font_meta(path, True)
                                 if flags_meta_list:
@@ -317,7 +352,14 @@ class FontCache:
                             except Exception:
                                 pass
                             prebaked.setdefault(prebake_key, []).append(
-                                {"path": str(path), "font_index": font_index, "styles": styles, "ps": ps, "weight": weight, "flags": flags}
+                                {
+                                    "path": str(path),
+                                    "font_index": font_index,
+                                    "styles": styles,
+                                    "ps": ps,
+                                    "weight": weight,
+                                    "flags": flags,
+                                }
                             )
                 if time.time() - start > budget_seconds:
                     partial = True
@@ -327,7 +369,7 @@ class FontCache:
     def _save_cache(
         self,
         entries: list[tuple[Path, int, list[str], list[str], str, int]],
-        prebaked: dict[str, list[dict]],
+        prebaked: dict[str, list[dict[str, object]]],
         partial: bool,
     ) -> None:
         """Save font cache to disk, including font_index for TTC collections."""
@@ -340,7 +382,8 @@ class FontCache:
             "fonts": [
                 {
                     "path": str(p),
-                    "font_index": font_index,  # Now stores font index for TTC collections
+                    # font_index stores TTC collection index
+                    "font_index": font_index,
                     "mtime": int(p.stat().st_mtime),
                     "families": fams,
                     "styles": styles,
@@ -357,8 +400,8 @@ class FontCache:
         except Exception as e:
             print(f"⚠️  Could not write font cache: {e}")
 
-    def _load_fc_cache(self):
-        """Load persistent font cache (cross-platform). Falls back to scanning once."""
+    def _load_fc_cache(self) -> None:
+        """Load persistent font cache (cross-platform). Falls back to scanning."""
         if self._fc_cache is not None:
             return
 
@@ -368,7 +411,7 @@ class FontCache:
             return
 
         # Build cache with spinner notice (first run)
-        msg = "The first time text2paths must build the font cache, and it can take up to 5 minutes. Please wait..."
+        msg = "First run: building font cache (can take up to 5 minutes)..."
         stop_evt = threading.Event()
         spinner_thread = threading.Thread(target=self._spinner, args=(msg, stop_evt))
         spinner_thread.daemon = True
@@ -384,14 +427,19 @@ class FontCache:
             stop_evt.set()
             spinner_thread.join(timeout=0.5)
             elapsed = time.time() - start
-            print(f"Font cache ready in {elapsed:.1f}s ({len(self._fc_cache or [])} fonts indexed).")
+            fonts_count = len(self._fc_cache or [])
+            print(f"Font cache ready in {elapsed:.1f}s ({fonts_count} fonts).")
 
     def prewarm(self) -> int:
-        """Ensure the font metadata cache is loaded, returning number of indexed fonts."""
+        """Ensure the font metadata cache is loaded.
+
+        Returns:
+            Number of indexed fonts.
+        """
         self._load_fc_cache()
         return len(self._fc_cache or [])
 
-    def prebaked_candidates(self, family: str) -> list[dict]:
+    def prebaked_candidates(self, family: str) -> list[dict[str, object]]:
         """Return prebaked fallback records for a family name (case-insensitive)."""
         self._load_fc_cache()
         if not self._prebaked:
@@ -403,12 +451,24 @@ class FontCache:
         self._load_fc_cache()
         return bool(self._cache_partial)
 
-    def fonts_with_coverage(self, codepoints: set[int], limit: int | None = 15) -> list[str]:
-        """Return font family names for installed fonts that cover at least one of the given codepoints (capped)."""
+    def fonts_with_coverage(
+        self, codepoints: set[int], limit: int | None = 15
+    ) -> list[str]:
+        """Return font family names covering at least one of the given codepoints.
+
+        Args:
+            codepoints: Set of Unicode codepoints to check coverage for.
+            limit: Maximum number of fonts to return (default 15).
+
+        Returns:
+            List of font family names that cover at least one codepoint.
+        """
         self._load_fc_cache()
         found: list[str] = []
         seen_fams: set[str] = set()
-        for path, font_index, fams, styles, ps, _weight in self._fc_cache:
+        if self._fc_cache is None:
+            return found
+        for path, font_index, fams, _styles, ps, _weight in self._fc_cache:
             if limit and len(found) >= limit:
                 break
             try:
@@ -422,7 +482,11 @@ class FontCache:
                         from fontTools.ttLib import TTCollection
 
                         coll = TTCollection(path, lazy=True)
-                        tt = coll.fonts[font_index] if font_index < len(coll.fonts) else coll.fonts[0]
+                        tt = (
+                            coll.fonts[font_index]
+                            if font_index < len(coll.fonts)
+                            else coll.fonts[0]
+                        )
                     else:
                         tt = TTFont(path, lazy=True)
                     cmap = tt.getBestCmap() or {}
@@ -441,7 +505,10 @@ class FontCache:
         return found
 
     def _split_words(self, name: str) -> set[str]:
-        """Split a font name into lowercase word tokens (camelCase, underscores, spaces)."""
+        """Split a font name into lowercase word tokens.
+
+        Handles camelCase, underscores, and spaces.
+        """
         tokens = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
         tokens = tokens.replace("_", " ")
         parts = [p.strip().lower() for p in tokens.split() if p.strip()]
@@ -563,19 +630,24 @@ class FontCache:
         stretch: str,
         ps_hint: str | None,
     ) -> tuple[Path, int] | None:
-        """Strict match: family must exist; weight/style must match token sets; no substitution.
+        """Strict match: family must exist; weight/style must match tokens.
 
-        TTC-fix: Cache now stores each font face from TTC collections as a separate entry
-        with its font_index, so we can directly return the cached font_index without
-        needing to re-scan the TTC file at runtime."""
+        No substitution allowed.
+
+        TTC-fix: Cache stores each font face from TTC collections as a separate
+        entry with its font_index, so we can directly return the cached font_index
+        without needing to re-scan the TTC file at runtime.
+        """
         self._load_fc_cache()
+        if self._fc_cache is None:
+            return None
         fam_norm = font_family.strip().lower()
         ps_norm = ps_hint.strip().lower() if ps_hint else None
         desired_style_tokens = self._style_token_set(
             self._build_style_label(weight, style, stretch)
         )
 
-        # best_candidate now stores (path, style_str, font_index) since cache has individual TTC entries
+        # best_candidate stores (path, style_str, font_index) for TTC entries
         best_candidate: tuple[Path, str, int] | None = None
         best_score: float | None = None
 
@@ -597,10 +669,8 @@ class FontCache:
                 ):
                     continue
                 score = self._style_match_score(st, weight, style, stretch)
-                try:
+                with contextlib.suppress(Exception):
                     score += abs((weight_val or 0) - weight) / 1000.0
-                except Exception:
-                    pass
                 if best_score is None or score < best_score:
                     best_score = score
                     # Now store font_index from cache entry for TTC collections
@@ -618,9 +688,11 @@ class FontCache:
         style: str = "normal",
         stretch: str = "normal",
     ) -> tuple[Path, int] | None:
-        """Use fontconfig to match fonts like a browser, but select the correct face inside
-        TTC collections based on weight/style/stretch tokens (e.g., choose Condensed face
-        instead of Regular when requested)."""
+        """Use fontconfig to match fonts like a browser.
+
+        Selects the correct face inside TTC collections based on weight/style/stretch
+        tokens (e.g., choose Condensed face instead of Regular when requested).
+        """
         import subprocess
 
         def stretch_token(stretch: str) -> str | None:
@@ -642,7 +714,7 @@ class FontCache:
             self._build_style_label(weight, style, stretch)
         )
 
-        # Build candidate patterns from specific to generic to prefer Regular when available
+        # Build candidate patterns from specific to generic (prefer Regular)
         style_name = self._weight_to_style(weight)
         patterns: list[str] = []
         if weight == 400 and style == "normal":
@@ -670,7 +742,9 @@ class FontCache:
         if font_family.lower() == "arial" and weight == 400 and style == "normal":
             patterns.insert(0, "Arial:style=Regular")
 
-        def pick_face(path: Path, preferred_style: str | None = None) -> tuple[Path, int]:
+        def pick_face(
+            path: Path, preferred_style: str | None = None
+        ) -> tuple[Path, int]:
             try:
                 if path.suffix.lower() == ".ttc":
                     from fontTools.ttLib import TTCollection
@@ -755,20 +829,22 @@ class FontCache:
         stretch: str = "normal",
         inkscape_spec: str | None = None,
         strict_family: bool = True,
-    ):
-        """Load font strictly; if exact face not found, return None (caller must abort unless strict_family=False).
+    ) -> tuple[TTFont, bytes, int] | None:
+        """Load font strictly; return None if exact face not found.
+
+        Caller must abort unless strict_family=False.
 
         Args:
             font_family: Font family name
             weight: CSS font-weight (100-900)
             style: CSS font-style
             stretch: CSS font-stretch
-            inkscape_spec: Optional Inkscape font specification hint (e.g., 'Futura Medium')
+            inkscape_spec: Inkscape font specification hint (e.g., 'Futura Medium')
 
         Returns:
-            (TTFont, font_blob_bytes, face_index) or None
+            Tuple of (TTFont, font_blob_bytes, face_index) or None.
         """
-        # Normalize generic Pango family names to CSS generics (but do NOT substitute specific faces)
+        # Normalize generic Pango family names to CSS generics
         generic_map = {
             "sans": "sans-serif",
             "sans-serif": "sans-serif",
@@ -794,7 +870,7 @@ class FontCache:
             )
 
             if match_result is None:
-                # Fallback to fontconfig best match (non-strict) to honor installed fonts
+                # Fallback to fontconfig best match (non-strict)
                 match_result = self._match_font_with_fc(
                     font_family, weight, style, stretch
                 )
@@ -816,7 +892,7 @@ class FontCache:
                     font_blob = f.read()
 
                 # Verify family match strictly against name table
-                def _name(tt, ids):
+                def _name(tt: TTFont, ids: list[int]) -> str | None:
                     for nid in ids:
                         for rec in tt["name"].names:
                             if rec.nameID == nid:
@@ -831,23 +907,25 @@ class FontCache:
                 fam_candidate = (
                     _name(ttfont, [16, 1]) or _name(ttfont, [1]) or ""
                 ).lower()
-                sub_candidate = (_name(ttfont, [17, 2]) or "").lower()
+                (_name(ttfont, [17, 2]) or "").lower()
 
                 def _norm(s: str) -> str:
                     return re.sub(r"[^a-z0-9]+", "", s.lower().lstrip("."))
 
-                if strict_family and font_family.lower() not in ("sans-serif", "sans"):
-                    if _norm(fam_candidate) != _norm(font_family):
-                        # Allow subset match
-                        if _norm(font_family) not in _norm(fam_candidate):
-                            print(
-                                f"⚠️  Loaded font '{font_path.name}' but family mismatch ({fam_candidate}) for requested '{font_family}'. Using it anyway."
-                            )
-                            # return None  <-- RELAXED: Do not abort, use the best match we found
+                # Check for family mismatch (RELAXED: use anyway)
+                is_generic = font_family.lower() in ("sans-serif", "sans")
+                family_mismatch = _norm(fam_candidate) != _norm(font_family)
+                not_subset = _norm(font_family) not in _norm(fam_candidate)
+                if strict_family and not is_generic and family_mismatch and not_subset:
+                    print(
+                        f"Font mismatch: got '{fam_candidate}' "
+                        f"for requested '{font_family}'. Using anyway."
+                    )
 
                 self._fonts[cache_key] = (ttfont, font_blob, font_index)
                 print(
-                    f"✓ Loaded: {font_family} w={weight} s={style} st={stretch} → {font_path.name}:{font_index}"
+                    f"Loaded: {font_family} w={weight} s={style} "
+                    f"st={stretch} -> {font_path.name}:{font_index}"
                 )
 
             except Exception as e:

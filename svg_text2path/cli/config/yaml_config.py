@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from svg_text2path.config import Config, FontConfig, ConversionConfig
+from svg_text2path.config import Config, ConversionConfig, FontConfig
 
 
 def load_yaml_config(path: Path) -> Config:
@@ -19,7 +19,7 @@ def load_yaml_config(path: Path) -> Config:
     Returns:
         Config object
     """
-    with open(path, "r") as f:
+    with open(path) as f:
         data = yaml.safe_load(f) or {}
 
     return _dict_to_config(data)

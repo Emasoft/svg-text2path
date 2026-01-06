@@ -11,14 +11,17 @@ import json
 import os
 import subprocess
 import sys
-from contextlib import redirect_stdout, redirect_stderr
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 # Import converter components
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from main import convert_svg_text_to_paths, apply_visual_correction  # type: ignore
-from main import FontCache  # type: ignore
+from main import (  # type: ignore
+    FontCache,  # type: ignore
+    apply_visual_correction,
+    convert_svg_text_to_paths,
+)
 
 _SBB_RESOLUTION_MODES = {"nominal", "viewbox", "full", "scale", "stretch", "clip"}
 

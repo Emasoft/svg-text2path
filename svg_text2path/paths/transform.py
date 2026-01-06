@@ -5,7 +5,6 @@ Supports matrix(), translate(), and scale() transforms.
 """
 
 import re
-import math
 
 
 def parse_svg_transform(transform_str: str) -> tuple[float, float]:
@@ -46,7 +45,10 @@ def parse_transform_matrix(
     if not transform_str:
         return (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
-    def mat_mul(m1, m2):
+    def mat_mul(
+        m1: tuple[float, float, float, float, float, float],
+        m2: tuple[float, float, float, float, float, float],
+    ) -> tuple[float, float, float, float, float, float]:
         a1, b1, c1, d1, e1, f1 = m1
         a2, b2, c2, d2, e2, f2 = m2
         return (
@@ -67,7 +69,7 @@ def parse_transform_matrix(
             for x in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", part.group(2))
         ]
         if kind == "matrix" and len(nums) == 6:
-            m = mat_mul(m, tuple(nums))
+            m = mat_mul(m, (nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]))
         elif kind == "translate" and len(nums) >= 1:
             tx = nums[0]
             ty = nums[1] if len(nums) > 1 else 0.0
@@ -91,7 +93,7 @@ def apply_transform_to_path(path_d: str, scale_x: float, scale_y: float) -> str:
     if scale_x == 1.0 and scale_y == 1.0:
         return path_d
 
-    def scale_numbers(match):
+    def scale_numbers(match: re.Match[str]) -> str:
         num = float(match.group(0))
         # Determine if this is an x or y coordinate based on position in string
         # This is approximate but works for our use case
@@ -101,7 +103,7 @@ def apply_transform_to_path(path_d: str, scale_x: float, scale_y: float) -> str:
     result = []
     parts = re.split(r"([MLHVCSQTAZ])", path_d, flags=re.IGNORECASE)
 
-    for i, part in enumerate(parts):
+    for part in parts:
         if not part or part.isspace():
             continue
 

@@ -4,9 +4,9 @@ Font report generator for SVG texts.
 Outputs a markdown table mapping text element id -> requested font attributes -> resolved font file (using our fuzzy matcher).
 """
 import re
-import importlib.import_module
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
 
 def load_fontcache():
     from text2path.main import FontCache

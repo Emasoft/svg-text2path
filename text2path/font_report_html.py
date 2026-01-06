@@ -10,11 +10,14 @@ Each row shows emojis on each pair (✅ auto same, ❔ unsure) and a GPT5 verdic
 Adds a final summary row with SAME/total.
 """
 
-import xml.etree.ElementTree as ET
+import contextlib
 import re
-from pathlib import Path
 import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
 import text2path.main as main
+
 
 def load_main():
     return main
@@ -223,10 +226,8 @@ def main():
     out=generate(args.svg, args.out)
     print(f"Wrote {out}")
     if args.open:
-        try:
+        with contextlib.suppress(Exception):
             subprocess.run(["open","-a","Google Chrome",str(out)], check=False)
-        except Exception:
-            pass
 
 if __name__=="__main__":
     main()

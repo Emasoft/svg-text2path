@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 # Tool repository mappings
 TOOL_REPOS = {
@@ -86,6 +84,7 @@ def _download_tool(tool_name: str, repo: str, dest: Path) -> None:
 
     # Extract
     import zipfile
+
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(dest.parent)
 

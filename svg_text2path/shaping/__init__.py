@@ -6,20 +6,20 @@ This subpackage provides:
 - Visual run processing
 """
 
-from svg_text2path.shaping.harfbuzz import (
-    shape_text,
-    shape_run,
-    create_hb_font,
-    ShapedGlyph,
-    ShapingResult,
-)
 from svg_text2path.shaping.bidi import (
+    BiDiRun,
     apply_bidi_algorithm,
+    detect_base_direction,
     get_bidi_runs,
     get_visual_runs,
     is_rtl_script,
-    detect_base_direction,
-    BiDiRun,
+)
+from svg_text2path.shaping.harfbuzz import (
+    ShapedGlyph,
+    ShapingResult,
+    create_hb_font,
+    shape_run,
+    shape_text,
 )
 
 __all__ = [

@@ -1,30 +1,179 @@
-# Text-to-Path Converter
+# svg-text2path
 
-Python CLI suite to convert all SVG text (text/tspan/textPath) into outline paths with HarfBuzz shaping, and to compare results against Inkscape/reference renders.
+Convert SVG text elements (`<text>`, `<tspan>`, `<textPath>`) to vector outline paths with HarfBuzz text shaping.
+
+[![CI](https://github.com/Emasoft/svg-text2path/actions/workflows/ci.yml/badge.svg)](https://github.com/Emasoft/svg-text2path/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/svg-text2path)](https://pypi.org/project/svg-text2path/)
+[![Python](https://img.shields.io/pypi/pyversions/svg-text2path)](https://pypi.org/project/svg-text2path/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
-- Unicode BiDi + HarfBuzz shaping (ligatures, RTL, complex scripts)
-- Strict font matching (fails on missing fonts; no silent fallbacks)
-- TextPath support with tangent-based placement
-- Visual diff helper with HTML history (`t2p_compare`)
 
-## Install
+- HarfBuzz text shaping (ligatures, kerning, complex scripts)
+- Unicode BiDi support (RTL Arabic, Hebrew)
+- TextPath support with tangent-based placement
+- Strict font matching (fails on missing fonts, no silent fallbacks)
+- 20+ input format handlers (file, string, HTML, CSS, JSON, markdown)
+- Visual diff via svg-bbox for pixel-perfect comparison
+- Cross-platform font resolution with caching
+
+## Installation
+
+### Library
 
 ```bash
-uv pip install -r requirements.txt
+pip install svg-text2path
+# or with uv
+uv add svg-text2path
 ```
 
-## CLI tools
+### Development
 
-- `t2p_convert input.svg [output.svg] [--precision N]` – convert text to paths; fails if any text remains or font is missing.
-- `t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--history-dir ./history] [--no-html]` – Chrome-based compare via `sbb-comparer.cjs` (SVG-BBOX), produces diff PNG + HTML (opens Chrome by default; use `--no-html` to skip opening but still generate the report).
-- Diagnostics: `t2p_font_report`, `t2p_font_report_html`, `t2p_analyze_path`, `t2p_text_flow_test`.
+```bash
+git clone https://github.com/Emasoft/svg-text2path.git
+cd svg-text2path
+uv sync --all-extras
+```
 
-## Current status (2025-11-21)
-- Advanced sample diff: **7.99%** vs original (target ~0.2% like Inkscape reference at 0.1977%).
-- Recent work: per-line chunk traversal fixed, textPath tangent placement, anchor pre-scaling removed. Remaining issues likely in RTL/inline-size flow and per-glyph dx/dy handling.
+## Quick Start
+
+### Python Library
+
+```python
+from svg_text2path import Text2PathConverter
+
+converter = Text2PathConverter()
+
+# Convert file
+result = converter.convert_file("input.svg", "output.svg")
+
+# Convert string
+svg_output = converter.convert_string(svg_content)
+
+# Convert element
+path_elem = converter.convert_element(text_element)
+```
+
+### CLI
+
+```bash
+# Basic conversion
+text2path input.svg -o output.svg
+
+# Batch processing
+text2path *.svg --output-dir ./converted/
+
+# With options
+text2path input.svg --precision 6 --preserve-styles
+
+# Font management
+text2path fonts list
+text2path fonts search "Noto Sans"
+```
+
+### Legacy CLI Tools
+
+```bash
+# Direct conversion
+t2p_convert input.svg [output.svg] [--precision N]
+
+# Visual comparison via Chrome + SVG-BBOX
+t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg]
+
+# Diagnostics
+t2p_font_report          # Console font report
+t2p_font_report_html     # HTML font report
+t2p_analyze_path         # Inspect path data
+```
+
+## Configuration
+
+### YAML Config
+
+Create `~/.text2path/config.yaml` or `./text2path.yaml`:
+
+```yaml
+defaults:
+  precision: 6
+  preserve_styles: false
+  output_suffix: "_text2path"
+
+fonts:
+  system_only: false
+  custom_dirs:
+    - ~/.fonts/custom
+
+replacements:
+  "Arial": "Liberation Sans"
+  "Helvetica": "Liberation Sans"
+```
+
+### Environment Variables
+
+```bash
+export T2P_FONT_CACHE=/path/to/font_cache.json
+```
+
+## API Reference
+
+### Text2PathConverter
+
+```python
+converter = Text2PathConverter(
+    font_cache=None,           # Optional: reuse FontCache across calls
+    precision=6,               # Path coordinate precision
+    preserve_styles=False,     # Keep style metadata on paths
+    log_level="WARNING",       # Logging level
+)
+```
+
+### ConversionResult
+
+```python
+@dataclass
+class ConversionResult:
+    success: bool
+    input_format: str
+    output: Path | str | Element
+    errors: list[str]
+    warnings: list[str]
+    text_count: int
+    path_count: int
+```
+
+## Supported Input Formats
+
+| Format | Detection |
+|--------|-----------|
+| SVG file | `.svg` extension |
+| SVGZ (gzip) | `.svgz` extension or gzip magic bytes |
+| SVG string | Starts with `<svg` or `<text` |
+| ElementTree | `isinstance(input, ET.Element)` |
+| HTML with SVG | Contains `<svg` in HTML |
+| CSS data URI | Contains `url("data:image/svg+xml` |
+| Inkscape SVG | sodipodi namespace detected |
 
 ## Requirements
-- `fonttools`, `python-bidi`, `uharfbuzz`
-- Fontconfig (`fc-match`, `fc-list`) available on PATH
-- `inkscape` for rendering/diff, `magick` optional for quick JPEG previews
+
+### Python Dependencies
+
+- `fonttools` - Font parsing, glyph extraction
+- `uharfbuzz` - HarfBuzz text shaping
+- `python-bidi` - Unicode BiDi algorithm
+- `defusedxml` - XXE-safe XML parsing
+- `click` - CLI framework
+- `rich` - CLI output formatting
+
+### External Tools (optional)
+
+- `fontconfig` (`fc-match`, `fc-list`) - Enhanced font matching
+- `node` - For Chrome-based visual comparison
+- `inkscape` - Reference rendering
+
+## License
+
+MIT
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import concurrent.futures
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
-from rich.progress import Progress, TaskID
+from rich.progress import Progress
 
-from svg_text2path import Text2PathConverter, ConversionResult
+from svg_text2path import ConversionResult, Text2PathConverter
 from svg_text2path.config import Config
 
 console = Console()
@@ -18,9 +17,21 @@ console = Console()
 
 @click.command()
 @click.argument("inputs", nargs=-1, type=click.Path(exists=True, path_type=Path))
-@click.option("--output-dir", "-o", type=click.Path(path_type=Path), required=True, help="Output directory")
-@click.option("--batch-file", type=click.Path(exists=True, path_type=Path), help="File containing list of inputs")
-@click.option("-p", "--precision", type=int, default=6, help="Path coordinate precision")
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Output directory",
+)
+@click.option(
+    "--batch-file",
+    type=click.Path(exists=True, path_type=Path),
+    help="File containing list of inputs",
+)
+@click.option(
+    "-p", "--precision", type=int, default=6, help="Path coordinate precision"
+)
 @click.option("--suffix", default="_text2path", help="Output filename suffix")
 @click.option("-j", "--jobs", type=int, default=4, help="Parallel jobs")
 @click.option("--continue-on-error", is_flag=True, help="Continue processing on errors")
@@ -29,7 +40,7 @@ def batch(
     ctx: click.Context,
     inputs: tuple[Path, ...],
     output_dir: Path,
-    batch_file: Optional[Path],
+    batch_file: Path | None,
     precision: int,
     suffix: str,
     jobs: int,
@@ -78,9 +89,7 @@ def batch(
         task = progress.add_task("[green]Converting...", total=len(all_inputs))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-            future_to_path = {
-                executor.submit(process_file, p): p for p in all_inputs
-            }
+            future_to_path = {executor.submit(process_file, p): p for p in all_inputs}
 
             for future in concurrent.futures.as_completed(future_to_path):
                 input_path = future_to_path[future]
@@ -92,19 +101,21 @@ def batch(
                     else:
                         error_count += 1
                         if not continue_on_error:
-                            console.print(f"[red]Error in {input_path}:[/red] {result.errors}")
+                            console.print(
+                                f"[red]Error in {input_path}:[/red] {result.errors}"
+                            )
                             raise SystemExit(1)
                 except Exception as e:
                     error_count += 1
                     if not continue_on_error:
                         console.print(f"[red]Error processing {input_path}:[/red] {e}")
-                        raise SystemExit(1)
+                        raise SystemExit(1) from None
                 finally:
                     progress.advance(task)
 
     # Summary
     console.print()
-    console.print(f"[bold]Batch complete:[/bold]")
+    console.print("[bold]Batch complete:[/bold]")
     console.print(f"  [green]Success:[/green] {success_count}")
     console.print(f"  [red]Failed:[/red] {error_count}")
     console.print(f"  [blue]Output:[/blue] {output_dir}")

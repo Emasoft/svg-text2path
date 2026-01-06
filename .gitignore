@@ -1,14 +1,45 @@
-# Generated logs
-logs/
+# Development folders (not published)
+CLAUDE.md
+docs_dev/
+scripts_dev/
+samples_dev/
+examples_dev/
+tests_dev/
+downloads_dev/
+libs_dev/
+builds_dev/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
 
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
 
 # Node/Pnpm
 node_modules/
+pnpm-lock.yaml
+
+# Generated logs
+logs/
+*.log
 
 # Temporary outputs and comparisons
+tmp/
+*_comparison.html
+*_diff.png
+*.comparison.html
+
+# Generated renders in samples
 samples/**/COMPARISONS/
 samples/**/SVG-PAIR-A-DIFF/
 samples/**/SVG-PAIR-B-DIFF/
@@ -20,31 +51,28 @@ samples/**/tspans*.json
 samples/**/text*_compare.json
 samples/**/text*_orig*.json
 samples/**/text*_conv*.json
-
-# Investigation scratch folders
 samples/TEXT*_INVESTIGATION/**
 samples/TEXT?_INVESTIGATION/**
 samples/TEXT??_INVESTIGATION/**
 samples/TEXT??/**
-
-# Generated renders
 samples/**/*.png
 samples/**/*.jpg
 samples/**/*_converted*.svg
-samples/**/*_converted*.png
-samples/**/*_converted*.jpg
 samples/**/*_out*.svg
-samples/**/*_out*.png
-samples/**/*_out*.jpg
 samples/**/*_rust_paths*.svg
 samples/**/*_live*.svg
-samples/**/*_live*.png
-samples/**/*_live*.jpg
 
 # Local backups and scratch
 backups/
 *~
 .DS_Store
+Thumbs.db
 
-# Ignore all samples output
-samples/
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.venv/
+venv/

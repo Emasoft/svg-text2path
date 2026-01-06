@@ -7,13 +7,18 @@ mixed left-to-right and right-to-left text (Arabic, Hebrew, etc.).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 try:
-    from bidi.algorithm import get_display, get_embedding_levels, get_empty_storage, get_base_level
+    from bidi.algorithm import (  # type: ignore[import-untyped]
+        get_base_level,
+        get_display,
+        get_embedding_levels,
+        get_empty_storage,
+    )
 except ImportError as e:
     raise ImportError(
-        "python-bidi is required for BiDi support. Install with: uv pip install python-bidi"
+        "python-bidi is required for BiDi support. "
+        "Install with: uv pip install python-bidi"
     ) from e
 
 
@@ -50,7 +55,8 @@ def apply_bidi_algorithm(text: str, base_direction: str = "auto") -> str:
     else:
         base_dir = "L"
 
-    return get_display(text, base_dir=base_dir)
+    result: str = get_display(text, base_dir=base_dir)
+    return result
 
 
 def get_bidi_runs(text: str, base_direction: str = "auto") -> list[BiDiRun]:
@@ -72,18 +78,18 @@ def get_bidi_runs(text: str, base_direction: str = "auto") -> list[BiDiRun]:
     # Get embedding levels for each character using python-bidi
     # python-bidi requires a properly initialized storage dict
     storage = get_empty_storage()
-    storage['base_level'] = get_base_level(text)
+    storage["base_level"] = get_base_level(text)
 
     # get_embedding_levels populates storage['chars'] with level info
     get_embedding_levels(text, storage)
 
     # Extract levels from the populated storage
-    chars = storage.get('chars', [])
+    chars = storage.get("chars", [])
     if not chars:
         # Fallback: treat as single LTR run
         return [BiDiRun(text=text, start=0, end=len(text), level=0, direction="ltr")]
 
-    levels = [ch['level'] for ch in chars]
+    levels = [ch["level"] for ch in chars]
 
     runs: list[BiDiRun] = []
     if not levels:
@@ -182,10 +188,11 @@ def is_rtl_script(text: str) -> bool:
     for char in text:
         code = ord(char)
         # Arabic range
-        if 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:
-            rtl_count += 1
-        # Hebrew range
-        elif 0x0590 <= code <= 0x05FF:
+        if (
+            0x0600 <= code <= 0x06FF
+            or 0x0750 <= code <= 0x077F
+            or 0x0590 <= code <= 0x05FF
+        ):
             rtl_count += 1
         # Latin/common LTR
         elif 0x0041 <= code <= 0x007A:

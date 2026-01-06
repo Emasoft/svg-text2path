@@ -14,20 +14,20 @@ This subpackage provides handlers for various SVG input formats:
 """
 
 from svg_text2path.formats.base import (
-    FormatHandler,
-    detect_format,
-    InputFormat,
     FormatDetectionResult,
+    FormatHandler,
+    InputFormat,
+    detect_format,
 )
+from svg_text2path.formats.css import CSSHandler
 from svg_text2path.formats.file import FileHandler
+from svg_text2path.formats.html import HTMLHandler
+from svg_text2path.formats.inkscape import InkscapeHandler
+from svg_text2path.formats.json_csv import CSVHandler, JSONHandler
+from svg_text2path.formats.markdown import MarkdownHandler
+from svg_text2path.formats.remote import RemoteHandler
 from svg_text2path.formats.string import StringHandler
 from svg_text2path.formats.tree import TreeHandler
-from svg_text2path.formats.html import HTMLHandler
-from svg_text2path.formats.css import CSSHandler
-from svg_text2path.formats.json_csv import JSONHandler, CSVHandler
-from svg_text2path.formats.markdown import MarkdownHandler
-from svg_text2path.formats.inkscape import InkscapeHandler
-from svg_text2path.formats.remote import RemoteHandler
 
 __all__ = [
     # Base classes and utilities

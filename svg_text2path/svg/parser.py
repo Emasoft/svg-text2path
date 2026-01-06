@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
-from xml.etree.ElementTree import register_namespace as _register_namespace
 
 if TYPE_CHECKING:
     from xml.etree.ElementTree import Element, ElementTree

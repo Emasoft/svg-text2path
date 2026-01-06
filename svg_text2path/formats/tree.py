@@ -5,7 +5,7 @@ Handles xml.etree.ElementTree and lxml etree objects.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
@@ -19,7 +19,11 @@ class TreeHandler(FormatHandler):
     @property
     def supported_formats(self) -> list[InputFormat]:
         """Return list of formats this handler supports."""
-        return [InputFormat.ELEMENT_TREE, InputFormat.LXML_TREE, InputFormat.BEAUTIFULSOUP]
+        return [
+            InputFormat.ELEMENT_TREE,
+            InputFormat.LXML_TREE,
+            InputFormat.BEAUTIFULSOUP,
+        ]
 
     def can_handle(self, source: Any) -> bool:
         """Check if this handler can process the given source.
@@ -40,10 +44,7 @@ class TreeHandler(FormatHandler):
 
         # Check for BeautifulSoup Tag
         type_name = type(source).__name__
-        if type_name in ("Tag", "BeautifulSoup"):
-            return True
-
-        return False
+        return type_name in ("Tag", "BeautifulSoup")
 
     def parse(self, source: Any) -> ElementTree:
         """Parse tree source into an ElementTree.
@@ -57,17 +58,17 @@ class TreeHandler(FormatHandler):
         Raises:
             SVGParseError: If parsing fails
         """
-        import defusedxml.ElementTree as ET
+        import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
 
         from svg_text2path.exceptions import SVGParseError
 
-        # Already an ElementTree
+        # Already an ElementTree - source already has correct type
         if hasattr(source, "getroot"):
-            return source
+            return cast("ElementTree", source)
 
         # Element - wrap in ElementTree
         if hasattr(source, "tag"):
-            return ET.ElementTree(source)
+            return cast("ElementTree", ET.ElementTree(source))
 
         # BeautifulSoup - convert to ElementTree
         type_name = type(source).__name__
@@ -84,9 +85,17 @@ class TreeHandler(FormatHandler):
 
         Returns:
             Root Element
+
+        Raises:
+            SVGParseError: If root element is None
         """
+        from svg_text2path.exceptions import SVGParseError
+
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Tree has no root element")
+        return root
 
     def serialize(self, tree: ElementTree, target: Any = None) -> Any:
         """Serialize ElementTree back to original format.
@@ -120,9 +129,11 @@ class TreeHandler(FormatHandler):
 
             # Parse with defusedxml
             root = ET.fromstring(svg_string)
-            return ET.ElementTree(root)
+            return cast("ElementTree", ET.ElementTree(root))
         except Exception as e:
-            raise SVGParseError(f"Failed to convert BeautifulSoup to ElementTree: {e}") from e
+            raise SVGParseError(
+                f"Failed to convert BeautifulSoup to ElementTree: {e}"
+            ) from e
 
     def _is_lxml(self, source: Any) -> bool:
         """Check if source is an lxml object."""

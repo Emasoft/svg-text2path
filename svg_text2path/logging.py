@@ -12,7 +12,6 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-
 # Module-level logger
 logger = logging.getLogger("svg_text2path")
 

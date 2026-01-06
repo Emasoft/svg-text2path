@@ -6,18 +6,11 @@ and complex script handling (Arabic, Devanagari, etc.).
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-try:
-    import uharfbuzz as hb
-except ImportError as e:
-    raise ImportError(
-        "uharfbuzz is required for text shaping. Install with: uv pip install uharfbuzz"
-    ) from e
+import uharfbuzz as hb  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -69,10 +62,8 @@ def create_hb_font(
     font.scale = (scale, scale)
 
     if variations:
-        try:
+        with contextlib.suppress(Exception):
             font.set_variations(variations)
-        except Exception:
-            pass  # Font may not support variations
 
     return font
 
@@ -118,17 +109,13 @@ def shape_text(
 
     # Set script if provided
     if script:
-        try:
+        with contextlib.suppress(Exception):
             buf.script = script
-        except Exception:
-            pass
 
     # Set language if provided
     if language:
-        try:
+        with contextlib.suppress(Exception):
             buf.language = language
-        except Exception:
-            pass
 
     # Build features dict
     hb_features = {}
@@ -144,7 +131,7 @@ def shape_text(
     positions = buf.glyph_positions
 
     glyphs: list[ShapedGlyph] = []
-    for info, pos in zip(infos, positions):
+    for info, pos in zip(infos, positions, strict=True):
         glyphs.append(
             ShapedGlyph(
                 glyph_id=info.codepoint,
@@ -197,16 +184,12 @@ def shape_run(
     buf.direction = "rtl" if direction == "rtl" else "ltr"
 
     if script:
-        try:
+        with contextlib.suppress(Exception):
             buf.script = script
-        except Exception:
-            pass
 
     if language:
-        try:
+        with contextlib.suppress(Exception):
             buf.language = language
-        except Exception:
-            pass
 
     hb_features = {}
     if features:
@@ -219,7 +202,7 @@ def shape_run(
     positions = buf.glyph_positions
 
     glyphs: list[ShapedGlyph] = []
-    for info, pos in zip(infos, positions):
+    for info, pos in zip(infos, positions, strict=True):
         glyphs.append(
             ShapedGlyph(
                 glyph_id=info.codepoint,

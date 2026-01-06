@@ -10,16 +10,22 @@ Example:
 
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+from xml.etree.ElementTree import (
+    Element,
+    ElementTree,
+)
+from xml.etree.ElementTree import (
+    register_namespace as _register_namespace,
+)
 
-import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
-from xml.etree.ElementTree import register_namespace as _register_namespace, Element, ElementTree
-from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-not-found]
-from svg.path import parse_path  # type: ignore[import-not-found]
+from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-untyped]
+from svg.path import parse_path
 
 from svg_text2path.config import Config
 from svg_text2path.exceptions import SVGParseError
@@ -121,7 +127,7 @@ class Text2PathConverter:
     def font_cache(self) -> FontCache:
         """Get or create the FontCache instance."""
         if self._font_cache is None:
-            self._font_cache = FontCache()  # type: ignore[no-untyped-call]
+            self._font_cache = FontCache()
         return self._font_cache
 
     @property
@@ -334,10 +340,8 @@ class Text2PathConverter:
                 path_id = elem.get("id")
                 d = elem.get("d")
                 if path_id and d:
-                    try:
+                    with contextlib.suppress(Exception):
                         self._path_map[path_id] = parse_path(d)
-                    except Exception:
-                        pass  # Skip invalid paths
 
     def _collect_text_with_parents(
         self, root: Element
@@ -480,7 +484,7 @@ class Text2PathConverter:
         elif text_anchor == "end":
             anchor_offset = -total_width
 
-        # Create path element (use standard Element, not defusedxml which is parsing-only)
+        # Create path element (standard Element, not defusedxml - parsing only)
         path_elem = Element(f"{{{SVG_NS}}}path")
         path_elem.set("d", " ".join(all_paths))
 
@@ -595,9 +599,9 @@ class Text2PathConverter:
                     ty1 = y + y1 * scale_y
                     tx = x + px * scale_x
                     ty = y + py * scale_y
-                    commands.append(
-                        f"Q {fmt.format(tx1)} {fmt.format(ty1)} {fmt.format(tx)} {fmt.format(ty)}"
-                    )
+                    q_cmd = f"Q {fmt.format(tx1)} {fmt.format(ty1)}"
+                    q_cmd += f" {fmt.format(tx)} {fmt.format(ty)}"
+                    commands.append(q_cmd)
                 else:
                     # Multiple control points with implied on-curve points
                     for i in range(len(args) - 1):
@@ -612,9 +616,9 @@ class Text2PathConverter:
                         ty1 = y + y1 * scale_y
                         tx = x + px * scale_x
                         ty = y + py * scale_y
-                        commands.append(
-                            f"Q {fmt.format(tx1)} {fmt.format(ty1)} {fmt.format(tx)} {fmt.format(ty)}"
-                        )
+                        q_cmd = f"Q {fmt.format(tx1)} {fmt.format(ty1)}"
+                        q_cmd += f" {fmt.format(tx)} {fmt.format(ty)}"
+                        commands.append(q_cmd)
 
             elif op == "curveTo":
                 # Cubic curves
@@ -628,9 +632,10 @@ class Text2PathConverter:
                     ty2 = y + y2 * scale_y
                     tx = x + px * scale_x
                     ty = y + py * scale_y
-                    commands.append(
-                        f"C {fmt.format(tx1)} {fmt.format(ty1)} {fmt.format(tx2)} {fmt.format(ty2)} {fmt.format(tx)} {fmt.format(ty)}"
-                    )
+                    c_cmd = f"C {fmt.format(tx1)} {fmt.format(ty1)}"
+                    c_cmd += f" {fmt.format(tx2)} {fmt.format(ty2)}"
+                    c_cmd += f" {fmt.format(tx)} {fmt.format(ty)}"
+                    commands.append(c_cmd)
 
             elif op == "closePath":
                 commands.append("Z")

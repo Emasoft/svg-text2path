@@ -6,10 +6,10 @@ Handles raw SVG strings and SVG snippets.
 from __future__ import annotations
 
 from io import StringIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
-import defusedxml.ElementTree as ET
+import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
 
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
@@ -57,11 +57,7 @@ class StringHandler(FormatHandler):
 
         # Check for SVG element tags (snippet)
         svg_tags = ["<text", "<path", "<g ", "<rect", "<circle", "<ellipse", "<polygon"]
-        for tag in svg_tags:
-            if tag in content.lower():
-                return True
-
-        return False
+        return any(tag in content.lower() for tag in svg_tags)
 
     def parse(self, source: str) -> ElementTree:
         """Parse SVG string into an ElementTree.
@@ -80,11 +76,11 @@ class StringHandler(FormatHandler):
         try:
             # Check if it's a complete SVG document
             if self._is_complete_svg(content):
-                return ET.parse(StringIO(content))
+                return cast("ElementTree", ET.parse(StringIO(content)))
 
             # Wrap snippet in SVG container
             wrapped = SVG_WRAPPER.format(content=content)
-            return ET.parse(StringIO(wrapped))
+            return cast("ElementTree", ET.parse(StringIO(wrapped)))
 
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG string: {e}") from e
@@ -104,7 +100,10 @@ class StringHandler(FormatHandler):
             SVGParseError: If parsing fails
         """
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Failed to get root element from parsed SVG")
+        return root
 
     def serialize(self, tree: ElementTree, target: Any = None) -> str:
         """Serialize ElementTree to SVG string.
@@ -133,10 +132,7 @@ class StringHandler(FormatHandler):
             return True
 
         # Has SVG root element at start
-        if lower.lstrip().startswith("<svg"):
-            return True
-
-        return False
+        return lower.lstrip().startswith("<svg")
 
     def _register_namespaces(self) -> None:
         """Register common SVG namespaces."""

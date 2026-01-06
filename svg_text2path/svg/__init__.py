@@ -7,9 +7,9 @@ This subpackage provides:
 """
 
 from svg_text2path.svg.parser import (
+    find_text_elements,
     parse_svg,
     parse_svg_string,
-    find_text_elements,
     write_svg,
 )
 

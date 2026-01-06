@@ -10,12 +10,11 @@ Usage:
 """
 
 import argparse
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-from text2path.frame_comparer import SVGRenderer, ImageComparator
+from text2path.frame_comparer import ImageComparator, SVGRenderer
 
 
 def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Path]:

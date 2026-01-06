@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
@@ -24,7 +23,7 @@ def fonts() -> None:
 @click.option("--family", help="Filter by font family name")
 @click.option("--style", help="Filter by style (normal, italic)")
 @click.option("--weight", type=int, help="Filter by weight (400, 700, etc)")
-def list_fonts(family: Optional[str], style: Optional[str], weight: Optional[int]) -> None:
+def list_fonts(family: str | None, style: str | None, weight: int | None) -> None:
     """List available fonts."""
     cache = FontCache()
 
@@ -38,8 +37,10 @@ def list_fonts(family: Optional[str], style: Optional[str], weight: Optional[int
     table.add_column("Path", style="dim")
 
     count = 0
-    # _fc_cache is list of (path, font_index, families, styles, postscript, weight) tuples
-    for path, font_index, families, styles, postscript, font_weight in (cache._fc_cache or []):
+    # _fc_cache is list of (path, font_index, families, styles, postscript, weight)
+    for path, _font_index, families, styles, _postscript, font_weight in (
+        cache._fc_cache or []
+    ):
         font_family = families[0] if families else "Unknown"
         font_style = styles[0] if styles else "normal"
         font_path = str(path)
@@ -112,19 +113,23 @@ def find_font(name: str) -> None:
             console.print(f"[dim]Face index:[/dim] {face_idx}")
         except Exception as e:
             console.print(f"[red]Not found:[/red] {e}")
-            raise SystemExit(1)
+            raise SystemExit(1) from e
 
 
 @fonts.command("report")
 @click.argument("svg_file", type=click.Path(exists=True, path_type=Path))
 def font_report(svg_file: Path) -> None:
     """Report fonts used in an SVG file."""
-    from svg_text2path.svg.parser import parse_svg, find_text_elements
+    from svg_text2path.svg.parser import find_text_elements, parse_svg
 
     tree = parse_svg(svg_file)
-    text_elements = find_text_elements(tree.getroot())
+    root = tree.getroot()
+    if root is None:
+        console.print("[red]Error: Could not parse SVG file[/red]")
+        raise SystemExit(1)
+    text_elements = find_text_elements(root)
 
-    fonts_used: dict[str, list] = {}
+    fonts_used: dict[tuple[str, str, str], list[str]] = {}
     for elem in text_elements:
         font_family = elem.get("font-family", "sans-serif")
         font_weight = elem.get("font-weight", "400")

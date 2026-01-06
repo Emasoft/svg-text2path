@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from svg_text2path import ConversionResult
 
@@ -22,12 +22,12 @@ def format_result(result: ConversionResult, verbose: bool = False) -> None:
         verbose: Whether to show detailed output
     """
     if result.success:
-        console.print(f"[green]Success[/green]")
+        console.print("[green]Success[/green]")
         console.print(f"  Text elements: {result.text_count}")
         console.print(f"  Path elements: {result.path_count}")
         console.print(f"  Output: {result.output}")
     else:
-        error_console.print(f"[red]Failed[/red]")
+        error_console.print("[red]Failed[/red]")
         for error in result.errors:
             error_console.print(f"  [red]Error:[/red] {error}")
 

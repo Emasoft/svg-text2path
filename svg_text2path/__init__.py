@@ -12,16 +12,16 @@ Example:
     >>> converter.convert_file("input.svg", "output.svg")
 """
 
-from svg_text2path.api import Text2PathConverter, ConversionResult
+from svg_text2path.api import ConversionResult, Text2PathConverter
 from svg_text2path.config import Config
-from svg_text2path.fonts.cache import FontCache
 from svg_text2path.exceptions import (
-    Text2PathError,
-    FontNotFoundError,
-    SVGParseError,
     ConversionError,
+    FontNotFoundError,
     FormatNotSupportedError,
+    SVGParseError,
+    Text2PathError,
 )
+from svg_text2path.fonts.cache import FontCache
 
 __version__ = "0.2.0"
 __author__ = "Emasoft"

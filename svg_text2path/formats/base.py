@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
+    from xml.etree.ElementTree import ElementTree
 
 
 class InputFormat(Enum):
@@ -150,7 +150,9 @@ def detect_format(source: Any) -> FormatDetectionResult:
 
     # Unknown format
     return FormatDetectionResult(
-        format=InputFormat.SVG_STRING, confidence=0.0, metadata={"error": "Unknown format"}
+        format=InputFormat.SVG_STRING,
+        confidence=0.0,
+        metadata={"error": "Unknown format"},
     )
 
 
@@ -161,9 +163,7 @@ def _looks_like_path(s: str) -> bool:
         return False
     if "/" in s or "\\" in s:
         return True
-    if s.endswith(".svg") or s.endswith(".svgz"):
-        return True
-    return False
+    return s.endswith(".svg") or s.endswith(".svgz")
 
 
 def _detect_file_format(path: Path) -> FormatDetectionResult:
@@ -252,7 +252,16 @@ def _detect_string_format(content: str) -> FormatDetectionResult:
         )
 
     # Check for SVG snippet (text, path, etc.)
-    svg_tags = ["<text", "<path", "<g ", "<rect", "<circle", "<ellipse", "<line", "<polygon"]
+    svg_tags = [
+        "<text",
+        "<path",
+        "<g ",
+        "<rect",
+        "<circle",
+        "<ellipse",
+        "<line",
+        "<polygon",
+    ]
     for tag in svg_tags:
         if tag in content_lower:
             return FormatDetectionResult(
@@ -260,11 +269,12 @@ def _detect_string_format(content: str) -> FormatDetectionResult:
             )
 
     # Check for HTML with embedded SVG
-    if "<html" in content_lower or "<!doctype html" in content_lower:
-        if "<svg" in content_lower:
-            return FormatDetectionResult(
-                format=InputFormat.HTML_EMBEDDED, confidence=0.9, metadata=metadata
-            )
+    if (
+        "<html" in content_lower or "<!doctype html" in content_lower
+    ) and "<svg" in content_lower:
+        return FormatDetectionResult(
+            format=InputFormat.HTML_EMBEDDED, confidence=0.9, metadata=metadata
+        )
 
     # Check for CSS with SVG
     if "url(" in content_lower and "data:image/svg+xml" in content_lower:
@@ -273,11 +283,12 @@ def _detect_string_format(content: str) -> FormatDetectionResult:
         )
 
     # Check for JSON
-    if content.strip().startswith("{") or content.strip().startswith("["):
-        if "<svg" in content or "\\u003csvg" in content_lower:
-            return FormatDetectionResult(
-                format=InputFormat.JSON_ESCAPED, confidence=0.8, metadata=metadata
-            )
+    if (content.strip().startswith("{") or content.strip().startswith("[")) and (
+        "<svg" in content or "\\u003csvg" in content_lower
+    ):
+        return FormatDetectionResult(
+            format=InputFormat.JSON_ESCAPED, confidence=0.8, metadata=metadata
+        )
 
     # Default to unknown string
     return FormatDetectionResult(

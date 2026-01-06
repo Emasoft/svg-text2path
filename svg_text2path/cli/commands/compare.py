@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
@@ -14,18 +13,32 @@ console = Console()
 @click.command()
 @click.argument("reference", type=click.Path(exists=True, path_type=Path))
 @click.argument("converted", type=click.Path(exists=True, path_type=Path))
-@click.option("--inkscape-svg", type=click.Path(exists=True, path_type=Path), help="Inkscape reference for 3-way comparison")
-@click.option("--output-dir", "-o", type=click.Path(path_type=Path), help="Output directory for comparison files")
+@click.option(
+    "--inkscape-svg",
+    type=click.Path(exists=True, path_type=Path),
+    help="Inkscape reference for 3-way comparison",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output directory for comparison files",
+)
 @click.option("--no-html", is_flag=True, help="Skip HTML comparison page generation")
 @click.option("--open", "open_browser", is_flag=True, help="Open comparison in browser")
-@click.option("--threshold", type=float, default=0.5, help="Diff threshold percentage for pass/fail")
+@click.option(
+    "--threshold",
+    type=float,
+    default=0.5,
+    help="Diff threshold percentage for pass/fail",
+)
 @click.pass_context
 def compare(
     ctx: click.Context,
     reference: Path,
     converted: Path,
-    inkscape_svg: Optional[Path],
-    output_dir: Optional[Path],
+    inkscape_svg: Path | None,
+    output_dir: Path | None,
     no_html: bool,
     open_browser: bool,
     threshold: float,
@@ -41,10 +54,7 @@ def compare(
     import webbrowser
 
     # Determine output directory
-    if output_dir:
-        out_dir = output_dir
-    else:
-        out_dir = Path("./diffs")
+    out_dir = output_dir or Path("./diffs")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -57,10 +67,13 @@ def compare(
             timeout=30,
         )
         if result.returncode != 0:
-            console.print("[yellow]Warning:[/yellow] svg-bbox not installed. Install with: npm install svg-bbox")
+            console.print(
+                "[yellow]Warning:[/yellow] svg-bbox not installed. "
+                "Install with: npm install svg-bbox"
+            )
     except FileNotFoundError:
         console.print("[red]Error:[/red] npx not found. Install Node.js first.")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     except subprocess.TimeoutExpired:
         console.print("[yellow]Warning:[/yellow] svg-bbox check timed out")
 
@@ -72,11 +85,15 @@ def compare(
     with console.status("[bold green]Rendering comparison..."):
         # Run svg-bbox comparison
         cmd = [
-            "npx", "svg-bbox", "compare",
+            "npx",
+            "svg-bbox",
+            "compare",
             str(reference.absolute()),
             str(converted.absolute()),
-            "--output", str(html_output),
-            "--diff", str(diff_output),
+            "--output",
+            str(html_output),
+            "--diff",
+            str(diff_output),
         ]
 
         if inkscape_svg:
@@ -92,35 +109,42 @@ def compare(
             )
 
             if result.returncode != 0:
-                console.print(f"[yellow]Warning:[/yellow] Comparison returned non-zero: {result.stderr}")
+                console.print(
+                    "[yellow]Warning:[/yellow] Comparison returned non-zero: "
+                    f"{result.stderr}"
+                )
         except subprocess.TimeoutExpired:
             console.print("[red]Error:[/red] Comparison timed out after 120 seconds")
-            raise SystemExit(1)
+            raise SystemExit(1) from None
         except Exception as e:
             console.print(f"[red]Error running comparison:[/red] {e}")
-            raise SystemExit(1)
+            raise SystemExit(1) from e
 
     # Parse diff percentage if available
     diff_pct = None
-    if diff_output.exists():
+    if diff_output.exists() and "diff:" in result.stdout.lower():
         # Try to extract diff percentage from comparison output
-        if "diff:" in result.stdout.lower():
-            import re
-            match = re.search(r'diff:\s*([\d.]+)%', result.stdout, re.IGNORECASE)
-            if match:
-                diff_pct = float(match.group(1))
+        import re
+
+        match = re.search(r"diff:\s*([\d.]+)%", result.stdout, re.IGNORECASE)
+        if match:
+            diff_pct = float(match.group(1))
 
     # Report results
     console.print()
-    console.print(f"[bold]Comparison complete:[/bold]")
+    console.print("[bold]Comparison complete:[/bold]")
     console.print(f"  [blue]Reference:[/blue] {reference}")
     console.print(f"  [blue]Converted:[/blue] {converted}")
 
     if diff_pct is not None:
         if diff_pct <= threshold:
-            console.print(f"  [green]Diff:[/green] {diff_pct:.2f}% (PASS, threshold {threshold}%)")
+            console.print(
+                f"  [green]Diff:[/green] {diff_pct:.2f}% (PASS, threshold {threshold}%)"
+            )
         else:
-            console.print(f"  [red]Diff:[/red] {diff_pct:.2f}% (FAIL, threshold {threshold}%)")
+            console.print(
+                f"  [red]Diff:[/red] {diff_pct:.2f}% (FAIL, threshold {threshold}%)"
+            )
 
     if not no_html and html_output.exists():
         console.print(f"  [blue]HTML:[/blue] {html_output}")

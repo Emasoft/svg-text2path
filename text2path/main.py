@@ -9,24 +9,23 @@ Key features:
 - Transform attribute handling to avoid rendering differences
 """
 
-import xml.etree.ElementTree as ET
-from pathlib import Path
-import sys
-import re
-import math
-import os
+import contextlib
 import json
-import subprocess
-import uuid
-from dataclasses import dataclass
-import tempfile
-import shutil
 import logging
-from logging.handlers import RotatingFileHandler
-from datetime import datetime
+import os
+import re
+import subprocess
+import sys
+import tempfile
 import threading
 import time
+import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 # --- Logging setup --------------------------------------------------------
 LOG = logging.getLogger("t2p")
@@ -203,7 +202,7 @@ def apply_transform_to_path(path_d, scale_x, scale_y):
     result = []
     parts = re.split(r"([MLHVCSQTAZ])", path_d, flags=re.IGNORECASE)
 
-    for i, part in enumerate(parts):
+    for _i, part in enumerate(parts):
         if not part or part.isspace():
             continue
 
@@ -250,17 +249,17 @@ def _mat_scale_lengths(m):
 
 
 try:
-    from fontTools.ttLib import TTFont, TTCollection
-    from fontTools.pens.recordingPen import RecordingPen, DecomposingRecordingPen
+    from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
     from fontTools.pens.svgPathPen import SVGPathPen
+    from fontTools.ttLib import TTCollection, TTFont
 except ImportError:
     print("Error: fontTools is required. Install with:")
     print("  uv pip install fonttools")
     sys.exit(1)
 
 try:
-    from bidi.algorithm import get_display, get_embedding_levels
     import uharfbuzz as hb
+    from bidi.algorithm import get_display, get_embedding_levels
 except ImportError:
     print("Error: python-bidi and uharfbuzz are required. Install with:")
     print("  uv pip install python-bidi uharfbuzz")
@@ -648,7 +647,7 @@ class FontCache:
         self._load_fc_cache()
         found: list[str] = []
         seen_fams: set[str] = set()
-        for path, font_index, fams, styles, ps, _weight in self._fc_cache:
+        for path, font_index, fams, _styles, ps, _weight in self._fc_cache:
             if limit and len(found) >= limit:
                 break
             try:
@@ -839,10 +838,8 @@ class FontCache:
                 ):
                     continue
                 score = self._style_match_score(st, weight, style, stretch)
-                try:
+                with contextlib.suppress(Exception):
                     score += abs((weight_val or 0) - weight) / 1000.0
-                except Exception:
-                    pass
                 if best_score is None or score < best_score:
                     best_score = score
                     # Now store font_index from cache entry for TTC collections
@@ -1075,7 +1072,7 @@ class FontCache:
                 fam_candidate = (
                     _name(ttfont, [16, 1]) or _name(ttfont, [1]) or ""
                 ).lower()
-                sub_candidate = (_name(ttfont, [17, 2]) or "").lower()
+                (_name(ttfont, [17, 2]) or "").lower()
 
                 def _norm(s: str) -> str:
                     import re
@@ -1379,10 +1376,8 @@ def text_to_path_rust_style(
             else 400
         )
     if variation_wght:
-        try:
+        with contextlib.suppress(Exception):
             font_weight = int(max(100, min(900, variation_wght)))
-        except Exception:
-            pass
 
     # Parse font-style
     font_style = get_attr(text_elem, "font-style", "normal")
@@ -1398,9 +1393,9 @@ def text_to_path_rust_style(
         # Keep the full string for token analysis (e.g., "Futura, Medium Italic")
         spec_clean = inkscape_spec_raw.strip("'\"")
         spec_lower = spec_clean.lower()
-        tokens = set(
+        tokens = {
             t.strip().lower() for t in re.split(r"[\s,]+", spec_clean) if t.strip()
-        )
+        }
 
         # Use tokens to refine weight/style when CSS parsing fell back to defaults
         def has_token(sub: str) -> bool:
@@ -1409,12 +1404,10 @@ def text_to_path_rust_style(
         if font_weight in (400, 500):
             wght_match = re.search(r"wght\s*=\s*(\d+)", spec_lower)
             if wght_match:
-                try:
+                with contextlib.suppress(Exception):
                     font_weight = int(
                         max(100, min(900, float(wght_match.group(1))))
                     )
-                except Exception:
-                    pass
 
         if font_weight in (400, 500):  # adjust only if we didn't get a strong signal
             # Break down common multi-word weight names (extra/ultra/semi/demi + light/bold/etc.)
@@ -1527,8 +1520,9 @@ def text_to_path_rust_style(
         ]
         best_sym = None
         best_score = -1
-        needed = set(ord(ch) for ch in text_content)
-        dingbat_range = lambda cp: 0x2600 <= cp <= 0x27FF
+        needed = {ord(ch) for ch in text_content}
+        def dingbat_range(cp):
+            return 0x2600 <= cp <= 0x27FF
         for fam in symbol_candidates:
             cand = font_cache.get_font(
                 fam,
@@ -1692,7 +1686,7 @@ def text_to_path_rust_style(
         # Pass variation settings to getGlyphSet for correct variable font instance
         # This uses fontTools' built-in interpolation, not instancer (which was tested and failed)
         if variation_settings:
-            location = {k: v for k, v in variation_settings}
+            location = dict(variation_settings)
             glyph_set_primary = ttfont.getGlyphSet(location=location)
             print(f"    ✓ Using glyph set at location: {location}")
         else:
@@ -1727,9 +1721,7 @@ def text_to_path_rust_style(
             if pen.value:
                 return True
             # Treat whitespace as present even if outline is empty
-            if chr(codepoint).isspace():
-                return True
-            return False
+            return bool(chr(codepoint).isspace())
         except Exception:
             return False
 
@@ -1758,7 +1750,7 @@ def text_to_path_rust_style(
     fallback_glyph_set = None
     fallback_scale = None
     fallback_hb_font = None
-    
+
     # Load standard fallback (sans-serif)
     fallback_data = font_cache.get_font("sans-serif", weight=400, style="normal")
     if fallback_data:
@@ -1769,18 +1761,16 @@ def text_to_path_rust_style(
         fallback_scale = (
             (font_size / fallback_ttfont["head"].unitsPerEm) if fallback_ttfont else 1.0
         )
-    
+
         # Create HarfBuzz font for fallback
         fallback_blob = hb.Blob(fallback_data[1])
         fallback_face = hb.Face(fallback_blob)
         fallback_hb_font = hb.Font(fallback_face)
         fallback_hb_font.scale = (int(font_size * 64), int(font_size * 64))
         if variation_settings:
-            try:
+            with contextlib.suppress(Exception):
                 fallback_hb_font.set_variations(dict(variation_settings))
-            except Exception:
-                pass
-    
+
     # Load dedicated CJK font for fallback
     cjk_ttfont = None
     cjk_hb_font = None
@@ -1794,14 +1784,14 @@ def text_to_path_rust_style(
     symbol_scale = None
     symbol_glyph_set = None
     symbol_cmap = None
-    
+
     # Identify CJK chars in text to check coverage
     cjk_chars_in_text = [
         ord(ch)
         for ch in text_content
         if 0x4E00 <= ord(ch) <= 0x9FFF or 0x3400 <= ord(ch) <= 0x4DBF
     ]
-    
+
     if cjk_chars_in_text:
         # Determine if serif is preferred based on font family name
         primary_lower = font_family.lower()
@@ -1811,7 +1801,7 @@ def text_to_path_rust_style(
             or "mincho" in primary_lower
             or "times" in primary_lower
         )
-    
+
         cjk_candidates = [
             "PingFang SC",
             "Heiti SC",
@@ -1855,7 +1845,7 @@ def text_to_path_rust_style(
             Path(__file__).parent.parent,
         )
         scored_cjk: list[tuple[float, str, tuple | None, dict, Any]] = []
-    
+
         for cjk_fam in cjk_candidates:
             for wgt in weight_candidates:
                 cjk_data = font_cache.get_font(
@@ -1889,7 +1879,7 @@ def text_to_path_rust_style(
                         scored_cjk.append((score, cjk_fam, dims, temp_cmap, cjk_data))
                     else:
                         print(f"    → Skipped CJK font {cjk_fam} (no coverage for text)")
-    
+
         if scored_cjk:
             scored_cjk.sort(key=lambda x: x[0])
             # If Chrome detector found a match, bias toward it only when scores tie.
@@ -1913,7 +1903,7 @@ def text_to_path_rust_style(
             cjk_scale = (
                 (font_size / cjk_ttfont["head"].unitsPerEm) if cjk_ttfont else 1.0
             )
-    
+
             # Create HarfBuzz font for CJK
             cjk_blob = hb.Blob(cjk_data[1])
             cjk_face = hb.Face(cjk_blob)
@@ -1921,11 +1911,9 @@ def text_to_path_rust_style(
             cjk_upem = cjk_ttfont["head"].unitsPerEm
             cjk_hb_font.scale = (cjk_upem, cjk_upem)
             if variation_settings:
-                try:
+                with contextlib.suppress(Exception):
                     cjk_hb_font.set_variations(dict(variation_settings))
-                except Exception:
-                    pass
-    
+
     # If we have a dedicated CJK fallback with coverage, don't force general fallback to handle those glyphs
     if cjk_cmap:
         missing_chars = [
@@ -1935,7 +1923,7 @@ def text_to_path_rust_style(
                 0x3400 <= ord(ch) <= 0x9FFF and cjk_cmap.get(ord(ch), 0) not in (None, 0)
             )
         ]
-    
+
     # Check for CJK script mismatch to force fallback
     # (If we have CJK chars but loaded a non-CJK font like .SF Arabic Rounded, force fallback)
     cjk_indicators = [
@@ -1956,7 +1944,7 @@ def text_to_path_rust_style(
     ]
     primary_name = font_family.lower()
     is_cjk_font = any(ind in primary_name for ind in cjk_indicators)
-    
+
     symbol_families = {"webdings", "wingdings", "wingdings 2", "wingdings 3", "symbol"}
 
     # Identify CJK chars in text
@@ -1965,7 +1953,7 @@ def text_to_path_rust_style(
         for ch in text_content
         if 0x4E00 <= ord(ch) <= 0x9FFF or 0x3400 <= ord(ch) <= 0x4DBF
     ]
-    
+
     if cjk_chars and not is_cjk_font:
         # Only force fallback for CJK chars actually missing in the primary font
         missing_cjk = [
@@ -2025,13 +2013,13 @@ def text_to_path_rust_style(
                 candidates.append(path)
 
         return candidates
-    
+
     if missing_chars:
         if text_elem.get("id") == "text8":
             print(f"DEBUG missing_chars for {text_elem.get('id')}: {missing_chars}")
         # Script-based fallback selection (single fallback per run)
         fb_weight = int(max(100, min(900, font_weight)))
-    
+
         src_path = input_svg_path
         target_bbox = (
             measure_bbox_with_font(src_path, text_elem.get("id", ""), None)
@@ -2044,7 +2032,7 @@ def text_to_path_rust_style(
         charset_cands = fetch_charset_candidates({ord(ch) for ch in missing_chars})
         # weights to explore
         weight_candidates = expand_weights(font_weight)
-    
+
         def pick_fallback(chars: list[str]) -> list[str]:
             # Prioritize specific scripts
             for ch in chars:
@@ -2073,7 +2061,7 @@ def text_to_path_rust_style(
                         "Arial Unicode MS",
                         "Last Resort",
                     ]
-    
+
             # Secondary pass for symbols
             for ch in chars:
                 code = ord(ch)
@@ -2088,9 +2076,9 @@ def text_to_path_rust_style(
                         "Arial Unicode MS",
                         "Last Resort",
                     ]
-    
+
             return ["Apple Symbols", "Arial Unicode MS", "Last Resort"]
-    
+
         def _load_family_candidate(
             family: str, avoid_tokens: list[str] | None = None
         ):
@@ -2327,7 +2315,7 @@ def text_to_path_rust_style(
             or "☞" in text_content
         ):
             dbg(f"DEBUG FALLBACK: missing={missing_chars[:10]}... fb_names={fb_names}")
-    
+
         fallback_font = None
         fallback_cmap = None
         best_cover = -1
@@ -2369,7 +2357,7 @@ def text_to_path_rust_style(
                         if cov > 0
                         else set()
                     )
-    
+
         def _sym_map(cp: int) -> int:
             return 0xF000 + cp if 0x20 <= cp <= 0xFF else cp
 
@@ -2380,7 +2368,7 @@ def text_to_path_rust_style(
                 if _sym_map(ord(ch)) in cmap
                 and cmap.get(_sym_map(ord(ch)), 0) != 0
             )
-    
+
         # If no Chrome coverage, try bbox sampling on the missing chars to pick the closest visual match
         if not skip_coverage and missing_set:
             symbol_candidates = [
@@ -2444,7 +2432,7 @@ def text_to_path_rust_style(
                         fallback_cmap = cmap_test
                         best_cover = cov
                         skip_coverage = True
-    
+
         if not skip_coverage:
             for fb in fb_names:
                 candidate = None
@@ -2474,7 +2462,7 @@ def text_to_path_rust_style(
                         inkscape_spec=None,
                         strict_family=False,
                     )
-    
+
                 if candidate:
                     tt_test, blob_test, idx_test = candidate
                     if not _font_has_outlines(tt_test):
@@ -2493,7 +2481,7 @@ def text_to_path_rust_style(
                 # If we've already achieved full coverage, exit outer loop too
                 if best_cover == len(missing_set):
                     break
-    
+
         # Dedicated symbol fallback for dingbats (keep separate from general fallback).
         if any(0x2600 <= ord(ch) <= 0x27FF for ch in missing_chars):
             symbol_missing = [
@@ -2577,7 +2565,7 @@ def text_to_path_rust_style(
                     )
                 ]
                 missing_set = set(missing_chars)
-    
+
         if fallback_font:
             fallback_ttfont, fallback_blob, fallback_index = fallback_font
             print(f"    → Loaded fallback font: {fallback_ttfont.reader.file.name}")
@@ -2616,7 +2604,7 @@ def text_to_path_rust_style(
                 font_stretch,
                 f"Glyphs missing for chars '{uniq}' in font '{font_family}' and fallback",
             )
-    
+
     # If primary is a symbol font, force primary to an outline-capable symbol font (PUA mapped)
     if font_family.lower() in symbol_families:
         symbol_priority = [
@@ -2669,7 +2657,7 @@ def text_to_path_rust_style(
             glyph_set = fallback_glyph_set
             hb_font = fallback_hb_font
             missing_chars = []
-    
+
     # 4. Get font metrics
     units_per_em = ttfont["head"].unitsPerEm
     scale = font_size / units_per_em
@@ -2677,27 +2665,27 @@ def text_to_path_rust_style(
         dbg(f"DEBUG text4: metrics upem={units_per_em} scale={scale}")
     # Note: transform_sx and transform_sy will be applied when generating path coordinates
     # but NOT to the font_size itself (transform is on the element, not the font)
-    
+
     # Font coordinates have Y going up, SVG has Y going down
     # We need to flip Y, so we'll negate in the transform
-    
+
     # 5. Unicode BiDi analysis and script detection
     # Split text into runs by BOTH direction (LTR/RTL) AND script (Latin/Arab/etc)
-    
+
     # Get explicit direction from SVG attributes
     svg_direction = get_attr(text_elem, "direction", "ltr").lower()
     base_dir = "RTL" if svg_direction == "rtl" else "LTR"
-    
+
     try:
         import unicodedata
-    
+
         runs = []
         if not text_content:
             runs = [(0, 0, base_dir, "Latn")]
         else:
             # Get direction and script for each character
             char_props = []  # List of (direction, script)
-    
+
             # Check if text contains Arabic letters (AL) - for Arabic number handling
             has_arabic_letters = any(
                 unicodedata.bidirectional(c) == "AL" for c in text_content
@@ -2706,21 +2694,15 @@ def text_to_path_rust_style(
             for char in text_content:
                 # Determine direction
                 bidi_class = unicodedata.bidirectional(char)
-                if bidi_class in ("R", "AL", "RLE", "RLO"):
-                    direction = "RTL"
-                # Treat Arabic Numbers (AN) as RTL in Arabic text context
-                # AN digits flow LTR numerically but are part of RTL paragraph
-                elif bidi_class == "AN" and has_arabic_letters:
+                if bidi_class in ("R", "AL", "RLE", "RLO") or bidi_class == "AN" and has_arabic_letters:
                     direction = "RTL"
                 elif bidi_class in ("L", "LRE", "LRO"):
                     direction = "LTR"
                 else:
                     direction = None  # Neutral
-    
+
                 # Determine script (simplified - just Latin vs Arabic for now)
-                if bidi_class in ("R", "AL"):
-                    script = "Arab"
-                elif "\u0600" <= char <= "\u06ff":  # Arabic Unicode range
+                if bidi_class in ("R", "AL") or "\u0600" <= char <= "\u06ff":
                     script = "Arab"
                 elif 0x4E00 <= ord(char) <= 0x9FFF or 0x3400 <= ord(char) <= 0x4DBF:
                     script = "Hani"  # CJK
@@ -2728,29 +2710,29 @@ def text_to_path_rust_style(
                     script = "Latn"
                 else:
                     script = None  # Neutral (numbers, punctuation, spaces)
-    
+
                 char_props.append((direction, script))
-    
+
             # Resolve neutrals - inherit from previous non-neutral or base direction
             current_dir = base_dir
             current_script = "Latn"
-    
+
             for i, (d, s) in enumerate(char_props):
                 if d is not None:
                     current_dir = d
                 if s is not None:
                     current_script = s
-    
+
                 # Fill in neutrals
                 if char_props[i][0] is None:
                     char_props[i] = (current_dir, char_props[i][1])
                 if char_props[i][1] is None:
                     char_props[i] = (char_props[i][0], current_script)
-    
+
             # Extract runs - split when EITHER direction OR script changes
             run_start = 0
             current_dir, current_script = char_props[0]
-    
+
             for i in range(1, len(char_props)):
                 char_dir, char_script = char_props[i]
                 if char_dir != current_dir or char_script != current_script:
@@ -2759,14 +2741,14 @@ def text_to_path_rust_style(
                     run_start = i
                     current_dir = char_dir
                     current_script = char_script
-    
+
             # Add the final run
             runs.append((run_start, len(text_content), current_dir, current_script))
-    
+
     except Exception as e:
         print(f"  ⚠️  BiDi/script analysis failed: {e}")
         runs = [(0, len(text_content), base_dir, "Latn")]
-    
+
     # 6. Create HarfBuzz font
     if text_elem.get("id") == "text4" or "兛" in text_content:
         dbg("DEBUG text4: entering HB setup")
@@ -2780,7 +2762,7 @@ def text_to_path_rust_style(
         )  # CRITICAL: Must specify face index for TTC files
         hb_font = hb.Font(hb_face)
         hb_font.scale = (units_per_em, units_per_em)
-    
+
         # Apply font variations (e.g. wght, opsz)
         if variation_settings:
             try:
@@ -2788,7 +2770,7 @@ def text_to_path_rust_style(
                 print(f"    ✓ Applied variations: {variation_settings}")
             except Exception as e:
                 print(f"  ⚠️  Failed to apply font variations {variation_settings}: {e}")
-    
+
         # Fallback HB font (if needed later)
         if fallback_font:
             fb_tt, fb_blob, fb_idx = fallback_font
@@ -2811,7 +2793,7 @@ def text_to_path_rust_style(
                 symbol_hb_font = sym_font
             except Exception:
                 symbol_hb_font = None
-    
+
         if text_content and len(text_content) == 1 and text_content in "☰":
             dbg(
                 f"DEBUG icon '{text_content}': font_index={font_index}, ttfont_face={ttfont}, hb_face_index={hb_face.index}"
@@ -2823,7 +2805,7 @@ def text_to_path_rust_style(
         return None
     if text_elem.get("id") == "text4" or "兛" in text_content:
         dbg("DEBUG text4: after HB setup, before runs")
-    
+
     def _hb_features(n_bytes: int):
         feats = {}
         for tag, val in feature_settings:
@@ -2832,7 +2814,7 @@ def text_to_path_rust_style(
             except Exception:
                 continue
         return feats
-    
+
     # Collect font-feature-settings (before shaping)
     feature_settings: list[tuple[str, int]] = []
     feat_raw = get_attr(text_elem, "font-feature-settings", None)
@@ -2845,17 +2827,17 @@ def text_to_path_rust_style(
                 feature_settings.append((tag, int(val)))
         except Exception:
             feature_settings = []
-    
+
     # 7. Chunk layout and anchor computation (per Inkscape plain-SVG behavior)
     # Split runs into chunks by font coverage and accumulate widths before anchoring.
     # This also gives us per-chunk metrics for underline placement.
     chunk_list = []  # list of dicts: {start,end,font_key,width,positions,infos,ttfont,glyph_set,scale,cmap}
-    
+
     import bisect
-    
+
     # Precompute glyph set for primary (with variation location if applicable)
     if variation_settings:
-        location = {k: v for k, v in variation_settings}
+        location = dict(variation_settings)
         glyph_set_primary = ttfont.getGlyphSet(location=location)
     else:
         glyph_set_primary = ttfont.getGlyphSet()
@@ -2865,13 +2847,13 @@ def text_to_path_rust_style(
     for ch in text_content:
         acc_global += len(ch.encode("utf-8"))
         byte_offsets_global.append(acc_global)
-    
+
     for run_start, run_end, direction, script in runs:
         run_text = text_content[run_start:run_end]
-    
+
         if text_elem.get("id") == "text4" or "兛" in text_content:
             dbg(f"DEBUG text4: run '{run_text}' dir={direction} script={script}")
-    
+
         # Segment run by font coverage (primary vs fallback)
         segments = []
         current_font = None
@@ -2902,7 +2884,7 @@ def text_to_path_rust_style(
                 primary_name = font_family.lower()
                 if not any(ind in primary_name for ind in cjk_indicators):
                     prefer_fallback = True
-    
+
             # Check symbol font PUA first
             is_symbol = (font_family or "").lower() in (
                 "webdings",
@@ -2931,12 +2913,12 @@ def text_to_path_rust_style(
                     current_font = font_key
                     seg_start = idx
                 continue
-    
+
             if 0x4E00 <= cp <= 0x9FFF:
                 print(
                     f"DEBUG CJK: cp={cp} in_cjk={cp in cjk_cmap if cjk_cmap else 'None'} in_fallback={cp in fallback_cmap if fallback_cmap else 'None'} in_primary={cp in cmap}"
                 )
-    
+
             if is_symbol and pua_cp in cmap and cmap.get(pua_cp, 0) != 0:
                 font_key = "primary"
             elif (
@@ -2991,7 +2973,7 @@ def text_to_path_rust_style(
                 seg_start = idx
         if current_font is not None:
             segments.append((current_font, seg_start, len(run_text)))
-    
+
         # Shape each segment and store
         for font_key, s, e in segments:
             seg_text = run_text[s:e]
@@ -3046,9 +3028,9 @@ def text_to_path_rust_style(
                     if fallback_ttfont:
                         dbg(f"DEBUG text4: Fallback Font Name: {fallback_ttfont.reader.file.name}")
                         dbg(f"DEBUG text4: Fallback UnitsPerEm: {fallback_ttfont['head'].unitsPerEm}")
-    
+
             buf = hb.Buffer()
-    
+
             # Handle Symbol font PUA remapping
             if font_key == "primary" and font_family.lower() in (
                 "webdings",
@@ -3089,9 +3071,9 @@ def text_to_path_rust_style(
                         else:
                             new_seg_text.append(ch)
                     seg_text = "".join(new_seg_text)
-    
+
                 buf.add_str(seg_text)
-    
+
             buf.direction = "rtl" if direction == "RTL" else "ltr"
             buf.guess_segment_properties()
             hb.shape(
@@ -3099,7 +3081,7 @@ def text_to_path_rust_style(
             )
             seg_infos = buf.glyph_infos
             seg_positions = buf.glyph_positions
-    
+
             if "javascript" in text_content.lower() or text_elem.get("id") in [
                 "text53",
                 "text54",
@@ -3110,14 +3092,14 @@ def text_to_path_rust_style(
                 if hasattr(seg_ttfont, "reader") and hasattr(seg_ttfont.reader, "file"):
                     dbg(f"  Font file: {seg_ttfont.reader.file.name}")
                 dbg(f"  Scale: {seg_scale}")
-                dbg(f"  Glyphs:")
-                for i, (info, pos) in enumerate(zip(seg_infos, seg_positions)):
+                dbg("  Glyphs:")
+                for i, (info, pos) in enumerate(zip(seg_infos, seg_positions, strict=False)):
                     dbg(
                         f"    [{i}] char_idx={info.cluster} codepoint={info.codepoint} x_adv={pos.x_advance} x_off={pos.x_offset} y_off={pos.y_offset}"
                     )
-    
+
             width = sum(p.x_advance for p in seg_positions) * (seg_scale or 1.0)
-    
+
             chunk_list.append(
                 {
                     "run_start": run_start,
@@ -3138,16 +3120,15 @@ def text_to_path_rust_style(
                     "local_byte_offsets": local_byte_offsets,
                 }
             )
-    
+
     # 8. Shape text with HarfBuzz and render glyphs (chunk-based, anchor once)
-    import bisect
-    
+
     all_paths = []
     advance_x = 0.0  # legacy total advance across lines
     line_decors: list[tuple[float, float, float]] = []  # (start_x, end_x, baseline_y)
-    
+
     path_len = path_obj.length() if path_obj is not None else None
-    
+
     # Group chunks by baseline (y) to anchor per line (handles multiple tspans sharing a line)
     lines: list[list[dict]] = []
     current_line = []
@@ -3167,7 +3148,7 @@ def text_to_path_rust_style(
         last_y = y
     if current_line:
         lines.append(current_line)
-    
+
     def _measure_line_width(line_chunks: list[dict]) -> float:
         """Compute visual line width like Inkscape: sum advances & dx/spacing; trim trailing spacing."""
         width = 0.0
@@ -3181,15 +3162,15 @@ def text_to_path_rust_style(
             local_offset = chunk["local_offset"]
             seg_len = chunk["end"] - chunk["start"]
             seg_text = run_text[local_offset : local_offset + seg_len]
-    
+
             local_byte_offsets = [0]
             acc_local = 0
             for ch in seg_text:
                 acc_local += len(ch.encode("utf-8"))
                 local_byte_offsets.append(acc_local)
-    
+
             cursor = 0.0
-            for info, pos in zip(seg_infos, seg_positions):
+            for info, pos in zip(seg_infos, seg_positions, strict=False):
                 cluster = info.cluster
                 char_idx_local = max(
                     0, bisect.bisect_right(local_byte_offsets, cluster) - 1
@@ -3212,7 +3193,7 @@ def text_to_path_rust_style(
                     cursor += adv
                 last_letter = letter_spacing
             width += abs(cursor)
-    
+
             if DEBUG_ENABLED and "No javascript" in run_text:
                 dbg(
                     "DEBUG MEASURE: run_text='%s' glyph_count=%s cursor=%s width_so_far=%s",
@@ -3221,11 +3202,11 @@ def text_to_path_rust_style(
                     cursor,
                     width,
                 )
-    
+
         width -= last_letter
         width -= last_word
         return width
-    
+
     for line_chunks in lines:
         # Use base_dir (from SVG attribute) for alignment logic to match SVG spec/Chrome
         # This fixes the "Inkscape Arabic bug" where Inkscape ignores direction:ltr
@@ -3246,9 +3227,9 @@ def text_to_path_rust_style(
         if DEBUG_ENABLED and has_arabic:
             print(f"DEBUG ANCHOR: anchor={text_anchor} base_dir={base_dir} align_dir={align_dir} line_dirs={line_dirs} line_width={line_width:.2f} offset={line_anchor_offset:.2f}")
             print(f"DEBUG POS: x={x:.2f} y={y:.2f} current_x={x + line_anchor_offset:.2f}")
-    
+
         line_baseline = line_chunks[0].get("line_y", y) if line_chunks else y
-    
+
         def _chunk_width(chunk: dict) -> float:
             seg_scale = chunk["scale"] or 1.0
             seg_infos = chunk["infos"]
@@ -3263,7 +3244,7 @@ def text_to_path_rust_style(
                 acc_local += len(ch.encode("utf-8"))
                 local_byte_offsets.append(acc_local)
             cursor = 0.0
-            for info, pos in zip(seg_infos, seg_positions):
+            for info, pos in zip(seg_infos, seg_positions, strict=False):
                 cluster = info.cluster
                 char_idx_local = max(
                     0, bisect.bisect_right(local_byte_offsets, cluster) - 1
@@ -3277,14 +3258,14 @@ def text_to_path_rust_style(
                     add_spacing += word_spacing
                 cursor += (pos.x_advance * seg_scale) + current_dx + add_spacing
             return abs(cursor - letter_spacing)
-    
+
         # Unified cursor for mixed BiDi flow
         # We process chunks in logical order (as they appear in the list)
         # and advance a single cursor. This ensures "100% " (LTR) comes before "ARABIC" (RTL)
         # in the visual layout if that's how they are ordered in the runs.
-    
+
         current_x = x + line_anchor_offset
-    
+
         for chunk in line_chunks:
             seg_ttfont = chunk["ttfont"]
             seg_scale = chunk["scale"] or 1.0
@@ -3295,15 +3276,15 @@ def text_to_path_rust_style(
             local_offset = chunk["local_offset"]
             seg_len = chunk["end"] - chunk["start"]
             seg_text = run_text[local_offset : local_offset + seg_len]
-    
+
             chunk_width = _chunk_width(chunk)
             chunk_dir = chunk.get("direction", "LTR")
-    
+
             if DEBUG_ENABLED and "No javascript" in text_content:
                 print(
                     f"DEBUG LAYOUT: font={font_family} x={x} line_width={line_width} anchor={text_anchor} offset={line_anchor_offset} dir={chunk_dir} chunk_width={chunk_width}"
                 )
-    
+
             # Determine start position for this chunk
             if chunk_dir == "RTL":
                 # For RTL chunk, we occupy [current_x, current_x + chunk_width]
@@ -3313,16 +3294,16 @@ def text_to_path_rust_style(
                 # If we iterate glyphs in logical order (which HarfBuzz does),
                 # for RTL they should be placed starting from the right edge?
                 # HarfBuzz positions are usually visual.
-    
+
                 # Let's assume standard LTR flow of chunks:
                 chunk_start = current_x
-    
+
                 # But wait, if the chunk is RTL, the glyphs inside might need
                 # to be offset differently.
                 # If we use the same logic as before:
                 # chunk_start = x + line_anchor_offset + (line_width - rtl_cursor - chunk_width)
                 # That was for right-aligned pile.
-    
+
                 # For inline RTL:
                 # The chunk starts at current_x.
                 # We need to ensure the glyphs land in [current_x, current_x + chunk_width].
@@ -3331,22 +3312,22 @@ def text_to_path_rust_style(
                 pass
             else:
                 chunk_start = current_x
-    
+
             # We'll handle the internal cursor logic inside the loop
             # But we need to pass the correct 'chunk_start' to the loop
             # For now, let's stick to the single cursor advancement
-    
+
             # Update for next chunk
             # current_x += chunk_width # We do this AFTER the loop or implicitly
-    
+
             # RE-DESIGN of the loop below:
             # We need to calculate absolute positions for glyphs.
-    
+
             # Let's use a local cursor for the chunk
             chunk_cursor = 0.0
             # if chunk_dir == 'RTL':
             #     chunk_cursor = chunk_width # WRONG if chunk_origin is already shifted
-    
+
             # For mixed-direction lines, HarfBuzz already outputs RTL glyphs in visual order.
             # For pure RTL lines, use right-edge placement with reversed iteration.
             if chunk_dir == "RTL" and not mixed_dir:
@@ -3365,9 +3346,9 @@ def text_to_path_rust_style(
             # HarfBuzz outputs glyphs in visual left-to-right order, but our RTL positioning
             # logic (chunk_cursor -= adv) expects right-to-left iteration
             if chunk_dir == "RTL" and not mixed_dir:
-                glyph_pairs = list(zip(seg_infos, seg_positions))[::-1]
+                glyph_pairs = list(zip(seg_infos, seg_positions, strict=False))[::-1]
             else:
-                glyph_pairs = list(zip(seg_infos, seg_positions))
+                glyph_pairs = list(zip(seg_infos, seg_positions, strict=False))
 
             for info, pos in glyph_pairs:
                 # HarfBuzz returns codepoint indices (not byte indices) when using add_str with Python strings
@@ -3412,7 +3393,7 @@ def text_to_path_rust_style(
                     glyph_name = seg_ttfont.getGlyphName(glyph_id)
                 except Exception:
                     glyph_name = None
-    
+
                 if DEBUG_ENABLED and any(
                     x in text_content for x in ["Λοπ", "No javascript", "lkœtrëå", "兛"]
                 ):
@@ -3450,7 +3431,7 @@ def text_to_path_rust_style(
                             )
 
                     sys.stdout.flush()
-    
+
                 # If glyph_name is None or not in seg_glyph_set, it's truly missing.
                 # If glyph_name is '.notdef' or glyph_id is 0, we check if it has a path.
                 glyph_is_notdef_or_zero = glyph_name == ".notdef" or glyph_id == 0
@@ -3507,7 +3488,7 @@ def text_to_path_rust_style(
                         else:
                             chunk_cursor += adv_na
                         continue
-    
+
                 pen = DecomposingRecordingPen(seg_glyph_set if glyph_name in (seg_glyph_set or {}) else fallback_glyph_set)
                 try:
                     glyph.draw(pen)
@@ -3522,20 +3503,20 @@ def text_to_path_rust_style(
                         cursor_chunk += adv_na
                     continue
                 recording = pen.value
-    
+
                 glyph_offset = 0.0
-    
+
                 if path_obj is not None and path_len and path_len > 0:
                     # Calculate offset along the path
                     # glyph_origin is the absolute X position in the text line
                     # We need the offset relative to the start of the line (x)
                     # This preserves line_anchor_offset in the position.
-    
+
                     dist_along_path = path_start_offset + (glyph_origin - x)
-    
+
                     # Apply dx
                     dist_along_path += current_dx
-    
+
                     # Clamp distance to path length to avoid errors
                     dist_along_path = max(0.0, min(path_len, dist_along_path))
 
@@ -3558,10 +3539,10 @@ def text_to_path_rust_style(
                     offset_normal = (pos.y_offset * seg_scale) + current_dy
                     base_x = base_point.real + normal_unit.real * offset_normal
                     base_y = base_point.imag + normal_unit.imag * offset_normal
-    
+
                     cos_t = tangent_unit.real
                     sin_t = tangent_unit.imag
-    
+
                     transformed_recording = []
                     for op, args in recording:
                         if op in ["moveTo", "lineTo"]:
@@ -3579,21 +3560,7 @@ def text_to_path_rust_style(
                                     b * new_x + d * new_y + f,
                                 )
                             transformed_recording.append((op, [(new_x, new_y)]))
-                        elif op == "qCurveTo":
-                            new_args = []
-                            for px, py in args:
-                                lx = px * seg_scale
-                                ly = -py * seg_scale
-                                rx = lx * cos_t - ly * sin_t
-                                ry = lx * sin_t + ly * cos_t
-                                nx = base_x + rx
-                                ny = base_y + ry
-                                if baked_matrix:
-                                    a, b, c, d, e, f = baked_matrix
-                                    nx, ny = (a * nx + c * ny + e, b * nx + d * ny + f)
-                                new_args.append((nx, ny))
-                            transformed_recording.append((op, new_args))
-                        elif op == "curveTo":
+                        elif op == "qCurveTo" or op == "curveTo":
                             new_args = []
                             for px, py in args:
                                 lx = px * seg_scale
@@ -3614,7 +3581,7 @@ def text_to_path_rust_style(
                     # Ensure glyph_origin is defined (it should be from above)
                     glyph_x = glyph_origin + (pos.x_offset * seg_scale) - glyph_offset
                     glyph_y = line_baseline + (pos.y_offset * seg_scale) + current_dy
-    
+
                     transformed_recording = []
                     for op, args in recording:
                         if op in ["moveTo", "lineTo"]:
@@ -3635,7 +3602,7 @@ def text_to_path_rust_style(
                             # However, RecordingPen usually delivers explicit points.
                             # If we get None, it's likely an implied point.
                             # We need to interpolate it from the previous and next points.
-    
+
                             # Flatten the list of points, handling None
                             clean_points = []
                             for i, point in enumerate(args):
@@ -3662,7 +3629,7 @@ def text_to_path_rust_style(
                                     else:
                                         # Start of list None? Should not happen for qCurveTo
                                         clean_points.append((0, 0))  # Fallback
-    
+
                             for px, py in clean_points:
                                 nx = px * seg_scale + glyph_x
                                 ny = -py * seg_scale + glyph_y
@@ -3683,7 +3650,7 @@ def text_to_path_rust_style(
                             transformed_recording.append((op, new_args))
                         elif op == "closePath":
                             transformed_recording.append((op, args))
-    
+
                 path_data = recording_pen_to_svg_path(transformed_recording, precision)
                 if path_data:
                     all_paths.append(path_data)
@@ -3696,7 +3663,7 @@ def text_to_path_rust_style(
             end_x_line = start_x_line + line_width
             line_decors.append((start_x_line, end_x_line, line_baseline))
         advance_x = max(advance_x, line_width)
-    
+
     # Generate text decorations (underline, line-through)
     decoration = get_attr(text_elem, "text-decoration", "none")
     # Also check style for text-decoration
@@ -3705,7 +3672,7 @@ def text_to_path_rust_style(
     )
     if style_decoration:
         decoration = style_decoration.group(1)
-    
+
     if decoration and decoration != "none" and line_decors:
         # Get font metrics for decoration
         # Default values if metrics are missing
@@ -3713,7 +3680,7 @@ def text_to_path_rust_style(
         underline_thickness = 0.05 * units_per_em
         strikeout_position = 0.3 * units_per_em
         strikeout_thickness = 0.05 * units_per_em
-    
+
         # Use metrics from the dominant chunk font (first chunk) for decoration
         dom_tt = chunk_list[0]["ttfont"] if chunk_list else ttfont
         try:
@@ -3730,9 +3697,9 @@ def text_to_path_rust_style(
                     strikeout_thickness = os2.yStrikeoutSize
         except Exception:
             pass
-    
+
         fmt = f"{{:.{precision}f}}"
-    
+
         for start_x, end_x, baseline_y in line_decors:
             deco_paths = []
             if "underline" in decoration:
@@ -3746,7 +3713,7 @@ def text_to_path_rust_style(
                         (start_x, y_pos + thickness),
                     ]
                 )
-    
+
             if "line-through" in decoration:
                 y_pos = baseline_y - (strikeout_position * scale)
                 thickness = strikeout_thickness * scale
@@ -3758,7 +3725,7 @@ def text_to_path_rust_style(
                         (start_x, y_pos + thickness),
                     ]
                 )
-    
+
             for rect in deco_paths:
                 pts = []
                 for px, py in rect:
@@ -3768,17 +3735,17 @@ def text_to_path_rust_style(
                     pts.append((px, py))
                 deco_path = f"M {fmt.format(pts[0][0])} {fmt.format(pts[0][1])} L {fmt.format(pts[1][0])} {fmt.format(pts[1][1])} L {fmt.format(pts[2][0])} {fmt.format(pts[2][1])} L {fmt.format(pts[3][0])} {fmt.format(pts[3][1])} Z"
                 all_paths.append(deco_path)
-    
+
     if not all_paths:
         print(
             f"  ✗ No path data generated for text '{text_content}' "
             f"(chunks={len(chunk_list)} infos={[len(ch['infos']) for ch in chunk_list] if chunk_list else []})"
         )
         return None
-    
+
     # 8. Create path element with SVG namespace
     path_elem = ET.Element("{http://www.w3.org/2000/svg}path")
-    
+
     # Copy presentation attributes from the source element
     # This ensures fill, stroke, etc. are preserved
     presentation_attrs = {
@@ -3801,15 +3768,15 @@ def text_to_path_rust_style(
         "clip-path",
         "transform",
     }
-    
+
     for k, v in text_elem.attrib.items():
         if k in presentation_attrs:
             path_elem.set(k, v)
-    
+
     # Ensure style is copied if present (it might contain fill/stroke)
     if "style" in text_elem.attrib and "style" not in path_elem.attrib:
         path_elem.set("style", text_elem.attrib["style"])
-    
+
     # Handle text-decoration (underline, line-through)
     decoration = get_attr(text_elem, "text-decoration", "none")
     if decoration != "none":
@@ -3819,50 +3786,50 @@ def text_to_path_rust_style(
             # Find the font used for the first run
             # This is a simplification; ideally we'd check each run's font
             # but usually decoration is consistent across the element
-    
+
             # Re-resolve the font for metrics (we didn't store the TTFont object in a way easily accessible here,
             # but we can grab it from the cache using the same params)
             # Actually, we can just use the metrics from the first chunk of the first line if available
-    
+
             # Let's look at the first chunk of the first line
             first_chunk = None
             if lines and lines[0]:
                 first_chunk = lines[0][0]
-    
+
             if first_chunk:
                 ttfont = first_chunk["ttfont"]
                 units_per_em = ttfont["head"].unitsPerEm
                 scale = font_size / units_per_em  # This is the font scale
-    
+
                 # Get underline/strikeout metrics from 'post' or 'OS/2' table
                 underline_position = -100  # Default
                 underline_thickness = 50  # Default
                 strikeout_position = 250  # Default
                 strikeout_thickness = 50  # Default
-    
+
                 if "post" in ttfont:
                     underline_position = ttfont["post"].underlinePosition
                     underline_thickness = ttfont["post"].underlineThickness
-    
+
                 if "OS/2" in ttfont:
                     strikeout_position = ttfont["OS/2"].yStrikeoutPosition
                     strikeout_thickness = ttfont["OS/2"].yStrikeoutSize
-    
+
                 # Calculate decoration geometry
                 # The decoration should span the entire width of the text
                 # We calculated 'advance_x' as the total width (approx)
                 # But for centered text, the start x is shifted.
-    
+
                 # We need the bounding box of the text to know where to draw the line
                 # Since we have the path data, we could calculate the bbox, but that's expensive.
                 # Instead, we use the layout information we computed.
-    
+
                 # For simplicity, we'll draw a rectangle for each line of text
-    
+
                 for line_chunks in lines:
                     if not line_chunks:
                         continue
-    
+
                     # Calculate line width and start position (similar to how we placed glyphs)
                     line_width = _measure_line_width(line_chunks)
                     if "text4" in str(text_elem.get("id")):
@@ -3872,7 +3839,7 @@ def text_to_path_rust_style(
                                 f"DEBUG text4 chunk: width={chunk['width']}, text='{chunk['text']}'"
                             )
                     line_dir = line_chunks[0].get("direction", "LTR")
-    
+
                     # Re-calculate line anchor offset
                     if text_anchor == "middle":
                         line_anchor_offset = -line_width / 2.0
@@ -3880,7 +3847,7 @@ def text_to_path_rust_style(
                         line_anchor_offset = 0.0 if line_dir == "RTL" else -line_width
                     else:
                         line_anchor_offset = -line_width if line_dir == "RTL" else 0.0
-    
+
                     # Line start X (relative to text insertion point 'x')
                     # Note: 'x' and 'y' are the text element's x,y
                     # But we are generating paths relative to (0,0) and letting the transform handle x,y?
@@ -3888,7 +3855,7 @@ def text_to_path_rust_style(
                     # Let's check:
                     #   pos_x = x + line_anchor_offset + ltr_cursor + (pos.x_offset * seg_scale)
                     # Yes, we bake x,y.
-    
+
                     # So the decoration line starts at: x + line_anchor_offset
                     # And has width: line_width
                     # Y position: y + (underline_position * scale)  (remember Y is flipped in SVG vs Font?)
@@ -3897,26 +3864,26 @@ def text_to_path_rust_style(
                     # So:
                     #   glyph_y = y - (pos.y_offset * seg_scale) - (pos.y_advance * seg_scale) ...
                     #   Actually, the pen flips it: transform=(scale, 0, 0, -scale, ...)
-    
+
                     # Let's look at how we draw glyphs:
                     # t = (seg_scale, 0, 0, -seg_scale, pos_x, pos_y)
                     # So pos_y is the baseline in SVG coordinates.
-    
+
                     # Underline Y (SVG coords) = baseline_y - (underline_position * scale)
                     # (Minus because underline_position is usually negative in font coords (below baseline),
                     #  and we want it below baseline in SVG (positive Y relative to baseline? No, SVG Y is down).
                     #  If font Y is up, underline_pos -100 is below.
                     #  In SVG Y down, below baseline is +100.
                     #  So we should SUBTRACT underline_position * scale (since -(-100) = +100).
-    
+
                     # Use the line's baseline y
                     line_y = line_chunks[0].get("line_y", y)
-    
+
                     deco_start_x = x + line_anchor_offset
                     deco_end_x = deco_start_x + line_width
-    
+
                     fmt = f"{{:.{precision}f}}"
-    
+
                     if "underline" in decoration:
                         u_y = line_y - (underline_position * scale)
                         u_h = underline_thickness * scale
@@ -3925,43 +3892,43 @@ def text_to_path_rust_style(
                         # Top-right: (end_x, u_y)
                         # Bottom-right: (end_x, u_y + u_h)
                         # Bottom-left: (start_x, u_y + u_h)
-    
+
                         rect_d = f"M {fmt.format(deco_start_x)} {fmt.format(u_y)} L {fmt.format(deco_end_x)} {fmt.format(u_y)} L {fmt.format(deco_end_x)} {fmt.format(u_y + u_h)} L {fmt.format(deco_start_x)} {fmt.format(u_y + u_h)} Z"
                         all_paths.append(rect_d)
-    
+
                     if "line-through" in decoration:
                         s_y = line_y - (strikeout_position * scale)
                         s_h = strikeout_thickness * scale
                         rect_d = f"M {fmt.format(deco_start_x)} {fmt.format(s_y)} L {fmt.format(deco_end_x)} {fmt.format(s_y)} L {fmt.format(deco_end_x)} {fmt.format(s_y + s_h)} L {fmt.format(deco_start_x)} {fmt.format(s_y + s_h)} Z"
                         all_paths.append(rect_d)
-    
+
     path_elem.set("d", " ".join(all_paths))
-    
+
     # 9. Copy ID
     if "id" in text_elem.attrib:
         path_elem.set("id", text_elem.get("id"))
-    
+
     # 10. Bake transform when possible; otherwise preserve
     # 10. Preserve transform
     if transform_attr:
         path_elem.set("transform", transform_attr)
-    
+
     # No stroke scaling needed since we preserved the transform
     stroke_scale = 1.0
-    
+
     # 11. Preserve styling (full style plus common stroke/fill attributes)
     if "style" in text_elem.attrib:
         style_val = text_elem.get("style")
         # If stroke-width present in style and we baked transform, scale it
         if stroke_scale != 1.0 and style_val and "stroke-width" in style_val:
-    
+
             def _scale_sw(match):
                 try:
                     num = float(match.group(1))
                     return f"stroke-width:{num * stroke_scale}"
                 except Exception:
                     return match.group(0)
-    
+
             style_val = re.sub(r"stroke-width:([\\d\\.]+)", _scale_sw, style_val)
         path_elem.set("style", style_val)
     for attr_name in (
@@ -3980,30 +3947,28 @@ def text_to_path_rust_style(
         if attr_name in text_elem.attrib:
             val = text_elem.get(attr_name)
             if attr_name == "stroke-width" and stroke_scale != 1.0:
-                try:
+                with contextlib.suppress(Exception):
                     val = str(float(val) * stroke_scale)
-                except Exception:
-                    pass
             path_elem.set(attr_name, val)
-    
+
     # 12. Preserve animations
     # Copy animate, animateTransform, set, animateMotion children
     for child in text_elem:
         tag = child.tag
         if "}" in tag:
             tag = tag.split("}")[1]
-    
+
         if tag in ("animate", "animateTransform", "set", "animateMotion"):
             # Clone the animation element
             import copy
-    
+
             anim_clone = copy.deepcopy(child)
             path_elem.append(anim_clone)
-    
+
     # Return both the path element and the total advance width
     return path_elem, advance_x
-    
-    
+
+
 def get_path_bbox(path_d):
     """Calculate the bounding box of a path string."""
     if not path_d:
@@ -4085,8 +4050,8 @@ def get_element_bbox(elem):
 
 
 def get_visual_bboxes(svg_path):
-    import subprocess
     import json
+    import subprocess
 
     script_path = Path(__file__).parent / "get_bboxes_for_text2path.cjs"
     if not script_path.exists():
@@ -5071,7 +5036,7 @@ def convert_svg_text_to_paths(
                     parent.remove(text_elem)
                     parent.insert(idx, path_elem)
                     converted += 1
-                    print(f"    ✓ Converted successfully")
+                    print("    ✓ Converted successfully")
 
                 else:
                     failed += 1
@@ -5087,7 +5052,7 @@ def convert_svg_text_to_paths(
             print(f"\n✗ FATAL ERROR converting text element '{elem_id}':")
             print(f"   Preview: '{preview_text}'")
             print(f"   Error: {e}")
-            print(f"\nTraceback:")
+            print("\nTraceback:")
             traceback.print_exc()
             sys.exit(1)
 
@@ -5122,7 +5087,7 @@ def convert_svg_text_to_paths(
     print(f"Saving result to {output_path}...")
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
-    print(f"\n✓ Conversion complete (Rust-style):")
+    print("\n✓ Conversion complete (Rust-style):")
     print(f"  Converted: {converted} text elements")
     print(f"  Failed: {failed} text elements")
     print(f"  Output: {output_path}")
@@ -5215,7 +5180,7 @@ def get_visual_bboxes(svg_path: Path, elem_ids: list = None) -> dict:
         subprocess.run(cmd, cwd=project_root, check=True, capture_output=True)
 
         if json_output_path.exists():
-            with open(json_output_path, "r") as f:
+            with open(json_output_path) as f:
                 bbox_data = json.load(f)
 
             visual_bboxes = {}
@@ -5269,10 +5234,8 @@ def measure_bbox_with_font(svg_path: Path, target_id: str, font_family: str | No
         return (w, h)
     except Exception:
         if tmp_path:
-            try:
+            with contextlib.suppress(Exception):
                 tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
         return None
 
 
@@ -5327,10 +5290,8 @@ def score_candidates_by_bbox(
         return best[1] if best else None
     finally:
         if tmp_svg:
-            try:
+            with contextlib.suppress(Exception):
                 tmp_svg.unlink(missing_ok=True)
-            except Exception:
-                pass
 
 
 def choose_fallback_by_bbox(

@@ -104,7 +104,9 @@ class InkscapeHandler(FormatHandler):
         tree = self.parse(source)
         return tree.getroot()
 
-    def serialize(self, tree: ElementTree, target: str | Path | None = None) -> str | Path:
+    def serialize(
+        self, tree: ElementTree, target: str | Path | None = None
+    ) -> str | Path:
         """Serialize ElementTree to SVG.
 
         Args:
@@ -295,7 +297,9 @@ class InkscapeHandler(FormatHandler):
         # Remove Inkscape attributes from all elements
         for elem in root.iter():
             attrs_to_remove = [
-                attr for attr in elem.attrib if INKSCAPE_NS in attr or SODIPODI_NS in attr
+                attr
+                for attr in elem.attrib
+                if INKSCAPE_NS in attr or SODIPODI_NS in attr
             ]
             for attr in attrs_to_remove:
                 del elem.attrib[attr]

@@ -8,9 +8,9 @@ from __future__ import annotations
 import gzip
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
-from xml.etree.ElementTree import register_namespace as _register_namespace
 
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat

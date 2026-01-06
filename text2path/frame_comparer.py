@@ -17,10 +17,9 @@ import argparse
 import json
 import subprocess
 import sys
-import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
-import xml.etree.ElementTree as ET
 
 import numpy as np
 from PIL import Image
@@ -422,7 +421,7 @@ def main():
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Comparing SVG files:")
+    print("Comparing SVG files:")
     print(f"  Reference: {args.svg1}")
     print(f"  Comparison: {args.svg2}")
     print()

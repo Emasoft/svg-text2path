@@ -57,6 +57,7 @@ Homepage = "https://github.com/Emasoft/svg-text2path"
 Documentation = "https://github.com/Emasoft/svg-text2path#readme"
 Repository = "https://github.com/Emasoft/svg-text2path.git"
 Issues = "https://github.com/Emasoft/svg-text2path/issues"
+Changelog = "https://github.com/Emasoft/svg-text2path/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

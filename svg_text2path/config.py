@@ -55,8 +55,12 @@ class Config:
     fonts: FontConfig = field(default_factory=FontConfig)
     conversion: ConversionConfig = field(default_factory=ConversionConfig)
     log_level: str = "WARNING"
-    cache_dir: Path = field(default_factory=lambda: Path.home() / ".text2path" / "cache")
-    tools_dir: Path = field(default_factory=lambda: Path.home() / ".text2path" / "tools")
+    cache_dir: Path = field(
+        default_factory=lambda: Path.home() / ".text2path" / "cache"
+    )
+    tools_dir: Path = field(
+        default_factory=lambda: Path.home() / ".text2path" / "tools"
+    )
 
     @classmethod
     def load(cls, config_path: Path | str | None = None) -> "Config":
@@ -111,7 +115,9 @@ class Config:
             if "remote" in fonts:
                 self.fonts.remote = fonts["remote"]
             if "custom_dirs" in fonts:
-                self.fonts.custom_dirs = [Path(p).expanduser() for p in fonts["custom_dirs"]]
+                self.fonts.custom_dirs = [
+                    Path(p).expanduser() for p in fonts["custom_dirs"]
+                ]
             if "replacements" in fonts:
                 self.fonts.replacements.update(fonts["replacements"])
             if "fallbacks" in fonts:

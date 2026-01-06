@@ -21,14 +21,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from main import convert_svg_text_to_paths, apply_visual_correction, FontCache  # type: ignore
+from main import (  # type: ignore
+    FontCache,
+    apply_visual_correction,
+    convert_svg_text_to_paths,
+)
 
 _SBB_RESOLUTION_MODES = {"nominal", "viewbox", "full", "scale", "stretch", "clip"}
 
