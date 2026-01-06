@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Fast batch compare with font cache reuse.
+
 - Loads FontCache once; converts all text*.svg (skips text4.svg by default).
 - Uses sbb-comparer --batch for one Chromium session.
-- First run may take ~2-3 min; subsequent runs are much faster (<1 min) thanks to warm font cache.
+- First run may take ~2-3 min; subsequent runs are much faster (<1 min)
+  thanks to warm font cache.
 """
 
 import argparse
@@ -33,12 +35,20 @@ def convert_worker(payload: tuple[str, str, int, bool, bool]) -> tuple[str, str]
     out_svg = Path(out_dir) / f"{svg.stem}_conv.svg"
     font_cache = FontCache()
     if verbose:
-        convert_svg_text_to_paths(svg, out_svg, precision=precision, font_cache=font_cache)
+        convert_svg_text_to_paths(
+            svg, out_svg, precision=precision, font_cache=font_cache
+        )
         if not no_correction:
             apply_visual_correction(svg, out_svg)
     else:
-        with open(os.devnull, "w") as devnull, redirect_stdout(devnull), redirect_stderr(devnull):
-            convert_svg_text_to_paths(svg, out_svg, precision=precision, font_cache=font_cache)
+        with (
+            open(os.devnull, "w") as devnull,
+            redirect_stdout(devnull),
+            redirect_stderr(devnull),
+        ):
+            convert_svg_text_to_paths(
+                svg, out_svg, precision=precision, font_cache=font_cache
+            )
             if not no_correction:
                 apply_visual_correction(svg, out_svg)
     return (str(svg), str(out_svg))
@@ -73,7 +83,9 @@ def main():
         help="Also include already-paths samples like text2-paths.svg (default: off).",
     )
     p.add_argument("--skip", nargs="*", default=["text4.svg"], help="Files to skip")
-    p.add_argument("--precision", type=int, default=3, help="Path precision for converter")
+    p.add_argument(
+        "--precision", type=int, default=3, help="Path precision for converter"
+    )
     p.add_argument(
         "--verbose", action="store_true", help="Show converter output (default: quiet)"
     )
@@ -86,7 +98,10 @@ def main():
         "--jobs",
         type=int,
         default=1,
-        help="Number of parallel conversion workers (default: 1). Use >1 with care (spawns additional font scans).",
+        help=(
+            "Number of parallel conversion workers (default: 1). "
+            "Use >1 with care (spawns additional font scans)."
+        ),
     )
     p.add_argument(
         "--force",
@@ -100,7 +115,7 @@ def main():
         help="Per-command timeout in seconds (applies to comparer). Default: 180.",
     )
     args = p.parse_args()
-    # Back-compat / convenience: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
+    # Back-compat: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
     if isinstance(args.resolution, str) and args.resolution.lower().endswith("x"):
         try:
             parsed_scale = float(args.resolution[:-1])
@@ -111,7 +126,8 @@ def main():
             pass
     if args.resolution not in _SBB_RESOLUTION_MODES:
         raise SystemExit(
-            f"Invalid --resolution '{args.resolution}'. Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
+            f"Invalid --resolution '{args.resolution}'. "
+            f"Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
         )
 
     root = repo_root()
@@ -124,10 +140,11 @@ def main():
     svgs = [
         svg
         for svg in sorted(samples.glob("text*.svg"))
-        if svg.name not in args.skip and (args.include_paths or "-paths" not in svg.name)
+        if svg.name not in args.skip
+        and (args.include_paths or "-paths" not in svg.name)
     ]
 
-    # Always prewarm the font cache; if the on-disk cache was deleted, this rebuilds it once.
+    # Always prewarm the font cache; if cache was deleted, this rebuilds it once.
     fc = FontCache()
     count = fc.prewarm()
     note = " (partial scan)" if fc.cache_is_partial() else ""
@@ -137,11 +154,18 @@ def main():
     if args.jobs and args.jobs > 1:
         with ProcessPoolExecutor(max_workers=args.jobs) as ex:
             job_payloads = [
-                (str(svg), str(conv_dir), args.precision, args.no_correction, args.verbose)
+                (
+                    str(svg),
+                    str(conv_dir),
+                    args.precision,
+                    args.no_correction,
+                    args.verbose,
+                )
                 for svg in svgs
             ]
             future_map = {
-                ex.submit(convert_worker, payload): payload[0] for payload in job_payloads
+                ex.submit(convert_worker, payload): payload[0]
+                for payload in job_payloads
             }
             for fut in as_completed(future_map):
                 res = fut.result()
@@ -151,7 +175,10 @@ def main():
         font_cache = FontCache()
         for svg in svgs:
             out_svg = conv_dir / f"{svg.stem}_conv.svg"
-            if not args.force and out_svg.exists() and out_svg.stat().st_mtime >= svg.stat().st_mtime:
+            is_cached = (
+                out_svg.exists() and out_svg.stat().st_mtime >= svg.stat().st_mtime
+            )
+            if not args.force and is_cached:
                 pairs.append((str(svg), str(out_svg)))
                 print(f"⏩ cached {svg.name}")
                 continue
@@ -162,7 +189,11 @@ def main():
                 if not args.no_correction:
                     apply_visual_correction(svg, out_svg)
             else:
-                with open(os.devnull, "w") as devnull, redirect_stdout(devnull), redirect_stderr(devnull):
+                with (
+                    open(os.devnull, "w") as devnull,
+                    redirect_stdout(devnull),
+                    redirect_stderr(devnull),
+                ):
                     convert_svg_text_to_paths(
                         svg, out_svg, precision=args.precision, font_cache=font_cache
                     )
@@ -176,11 +207,16 @@ def main():
 
     summary_path = out_dir / "summary.json"
     cmd = [
-        "node", str(root / "SVG-BBOX/sbb-comparer.cjs"),
-        "--batch", str(pairs_path),
-        "--threshold", str(args.threshold),
-        "--scale", str(args.scale),
-        "--resolution", args.resolution,
+        "node",
+        str(root / "SVG-BBOX/sbb-comparer.cjs"),
+        "--batch",
+        str(pairs_path),
+        "--threshold",
+        str(args.threshold),
+        "--scale",
+        str(args.scale),
+        "--resolution",
+        args.resolution,
         "--json",
     ]
     with summary_path.open("w") as f:
@@ -190,14 +226,11 @@ def main():
     failures = 0
     for r in summary.get("results", []):
         if r.get("error"):
-            print(f"{Path(r.get('svg1','')).name},error,FAIL ({r.get('error')})")
+            print(f"{Path(r.get('svg1', '')).name},error,FAIL ({r.get('error')})")
             failures += 1
             continue
         diff = float(
-            r.get("diffPercent")
-            or r.get("diffPercentage")
-            or r.get("diff")
-            or 0
+            r.get("diffPercent") or r.get("diffPercentage") or r.get("diff") or 0
         )
         svg1 = r.get("a") or r.get("svg1") or ""
         status = "pass" if diff < 3 else "FAIL"

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 # --- Logging setup --------------------------------------------------------
 LOG = logging.getLogger("t2p")
@@ -83,7 +84,10 @@ except ImportError:
 
 
 def _set_font_family(elem: ET.Element, family: str, weight: int | None = None):
-    """Update font-family/inkscape spec (and optionally font-weight/variations) on an element."""
+    """Update font-family/inkscape spec on an element.
+
+    Optionally also updates font-weight/variations.
+    """
     style = elem.get("style", "")
     # Replace font-family
     style = re.sub(r"font-family:[^;]+", f"font-family:'{family}'", style)
@@ -249,17 +253,16 @@ def _mat_scale_lengths(m):
 
 
 try:
-    from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
-    from fontTools.pens.svgPathPen import SVGPathPen
-    from fontTools.ttLib import TTCollection, TTFont
+    from fontTools.pens.recordingPen import DecomposingRecordingPen
+    from fontTools.ttLib import TTFont
 except ImportError:
     print("Error: fontTools is required. Install with:")
     print("  uv pip install fonttools")
     sys.exit(1)
 
 try:
+    import bidi.algorithm  # noqa: F401 - imported for availability check
     import uharfbuzz as hb
-    from bidi.algorithm import get_display, get_embedding_levels
 except ImportError:
     print("Error: python-bidi and uharfbuzz are required. Install with:")
     print("  uv pip install python-bidi uharfbuzz")
@@ -282,10 +285,15 @@ class FontCache:
         self._fonts: dict[
             str, tuple[TTFont, bytes, int]
         ] = {}  # Cache: font_spec -> (TTFont, bytes, face_index)
-        self._coverage_cache: dict[tuple[Path, int], set[int]] = {}  # (path, font_index) -> codepoints
+        self._coverage_cache: dict[
+            tuple[Path, int], set[int]
+        ] = {}  # (path, font_index) -> codepoints
 
     def _parse_inkscape_spec(self, inkscape_spec: str) -> tuple[str, str | None]:
-        """Parse Inkscape font specification like 'Futura, Medium' or '.New York, Italic'."""
+        """Parse Inkscape font specification.
+
+        Examples: 'Futura, Medium' or '.New York, Italic'.
+        """
         s = inkscape_spec.strip().strip("'\"")
         if "," in s:
             family, rest = s.split(",", 1)
@@ -316,7 +324,9 @@ class FontCache:
     # This fixes fonts like "Futura Medium Italic" (stored in Futura.ttc) being found.
     # The fix uses 6-tuple with font_index and iterates all fonts in TTC/OTC files.
     # Tested: improved text3.svg (12.35%→2.94%) and text54.svg (12.89%→0.78%).
-    _fc_cache: list[tuple[Path, int, list[str], list[str], str, int]] | None = None  # (path, font_index, fams, styles, ps, weight)
+    _fc_cache: list[tuple[Path, int, list[str], list[str], str, int]] | None = (
+        None  # (path, font_index, fams, styles, ps, weight)
+    )
     _cache_file: Path | None = None
     _cache_version: int = 4  # v4: stores all fonts from TTC collections with font_index
     _prebaked: dict[str, list[dict]] | None = None
@@ -358,9 +368,16 @@ class FontCache:
             self._cache_file = base / "font_cache.json"
         return self._cache_file
 
-    def _load_persistent_cache(self) -> tuple[
-        list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool
-    ] | None:
+    def _load_persistent_cache(
+        self,
+    ) -> (
+        tuple[
+            list[tuple[Path, int, list[str], list[str], str, int]],
+            dict[str, list[dict]],
+            bool,
+        ]
+        | None
+    ):
         """Load cached font metadata if present and fresh."""
         cache_path = self._cache_path()
         if not cache_path.exists():
@@ -374,7 +391,10 @@ class FontCache:
                 for d in data.get("dirs", [])
             }
             for d in dirs_state:
-                if not Path(d).exists() or int(Path(d).stat().st_mtime) != dirs_state[d]:
+                if (
+                    not Path(d).exists()
+                    or int(Path(d).stat().st_mtime) != dirs_state[d]
+                ):
                     return None
             entries: list[tuple[Path, int, list[str], list[str], str, int]] = []
             for rec in data.get("fonts", []):
@@ -413,13 +433,17 @@ class FontCache:
         sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
         sys.stdout.flush()
 
-    def _read_font_meta(self, path: Path, need_flags: bool) -> list[tuple[Path, int, list[str], list[str], str, int, dict]] | None:
+    def _read_font_meta(
+        self, path: Path, need_flags: bool
+    ) -> list[tuple[Path, int, list[str], list[str], str, int, dict]] | None:
         """Read font metadata from a font file.
 
-        For TTC/OTC collections, returns ALL fonts in the collection (not just the first).
-        This is critical for fonts like Futura.ttc which contain multiple styles.
+        For TTC/OTC collections, returns ALL fonts in the collection
+        (not just the first). Critical for fonts like Futura.ttc which
+        contain multiple styles.
 
-        Returns list of tuples: (path, font_index, families, styles, psname, weight, flags)
+        Returns list of tuples:
+            (path, font_index, families, styles, psname, weight, flags)
         """
         try:
             suffix = path.suffix.lower()
@@ -431,10 +455,13 @@ class FontCache:
             # For TTC/OTC collections, iterate ALL fonts to capture all styles
             if suffix in {".ttc", ".otc"}:
                 from fontTools.ttLib import TTCollection
+
                 try:
                     coll = TTCollection(path, lazy=True)
                     for font_index, tt in enumerate(coll.fonts):
-                        meta = self._extract_single_font_meta(path, font_index, tt, need_flags)
+                        meta = self._extract_single_font_meta(
+                            path, font_index, tt, need_flags
+                        )
                         if meta:
                             results.append(meta)
                 except Exception:
@@ -479,22 +506,33 @@ class FontCache:
                 pass
             flags = {}
             if need_flags:
-                # Light coverage flags (avoid loading later): basic Latin, Latin-1, CJK, RTL
+                # Light coverage flags (avoid loading later):
+                # basic Latin, Latin-1, CJK, RTL
                 flags = {"latin": False, "latin1": False, "cjk": False, "rtl": False}
                 try:
                     cmap = tt.getBestCmap() or {}
                     codes = set(cmap.keys())
                     flags["latin"] = any(0x0041 <= c <= 0x007A for c in codes)
                     flags["latin1"] = any(0x00A0 <= c <= 0x00FF for c in codes)
-                    flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(0x0590 <= c <= 0x05FF for c in codes)
-                    flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(0x3040 <= c <= 0x30FF for c in codes)
+                    flags["rtl"] = any(0x0600 <= c <= 0x08FF for c in codes) or any(
+                        0x0590 <= c <= 0x05FF for c in codes
+                    )
+                    flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(
+                        0x3040 <= c <= 0x30FF for c in codes
+                    )
                 except Exception:
                     pass
             return (path, font_index, fams, styles, psname, weight, flags)
         except Exception:
             return None
 
-    def _build_cache_entries(self) -> tuple[list[tuple[Path, int, list[str], list[str], str, int]], dict[str, list[dict]], bool]:
+    def _build_cache_entries(
+        self,
+    ) -> tuple[
+        list[tuple[Path, int, list[str], list[str], str, int]],
+        dict[str, list[dict]],
+        bool,
+    ]:
         """Build font cache entries, including ALL fonts from TTC/OTC collections."""
         dirs = self._font_dirs()
         font_files: set[Path] = set()
@@ -543,7 +581,8 @@ class FontCache:
                         fam_set = set(fams) | ({ps} if ps else set())
                         if fam_set & prebake_fams:
                             prebake_key = list(fam_set & prebake_fams)[0]
-                            # For prebake candidates, compute flags lazily now (may need to reopen)
+                            # For prebake candidates, compute flags lazily
+                            # now (may need to reopen)
                             flags = {}
                             try:
                                 flags_meta_list = self._read_font_meta(path, True)
@@ -556,7 +595,14 @@ class FontCache:
                             except Exception:
                                 pass
                             prebaked.setdefault(prebake_key, []).append(
-                                {"path": str(path), "font_index": font_index, "styles": styles, "ps": ps, "weight": weight, "flags": flags}
+                                {
+                                    "path": str(path),
+                                    "font_index": font_index,
+                                    "styles": styles,
+                                    "ps": ps,
+                                    "weight": weight,
+                                    "flags": flags,
+                                }
                             )
                 if time.time() - start > budget_seconds:
                     partial = True
@@ -579,7 +625,7 @@ class FontCache:
             "fonts": [
                 {
                     "path": str(p),
-                    "font_index": font_index,  # Now stores font index for TTC collections
+                    "font_index": font_index,  # Font index for TTC collections
                     "mtime": int(p.stat().st_mtime),
                     "families": fams,
                     "styles": styles,
@@ -607,7 +653,10 @@ class FontCache:
             return
 
         # Build cache with spinner notice (first run)
-        msg = "The first time text2paths must build the font cache, and it can take up to 5 minutes. Please wait..."
+        msg = (
+            "The first time text2paths must build the font cache, "
+            "and it can take up to 5 minutes. Please wait..."
+        )
         stop_evt = threading.Event()
         spinner_thread = threading.Thread(target=self._spinner, args=(msg, stop_evt))
         spinner_thread.daemon = True
@@ -623,10 +672,14 @@ class FontCache:
             stop_evt.set()
             spinner_thread.join(timeout=0.5)
             elapsed = time.time() - start
-            print(f"Font cache ready in {elapsed:.1f}s ({len(self._fc_cache or [])} fonts indexed).")
+            num_fonts = len(self._fc_cache or [])
+            print(f"Font cache ready in {elapsed:.1f}s ({num_fonts} fonts indexed).")
 
     def prewarm(self) -> int:
-        """Ensure the font metadata cache is loaded, returning number of indexed fonts."""
+        """Ensure the font metadata cache is loaded.
+
+        Returns number of indexed fonts.
+        """
         self._load_fc_cache()
         return len(self._fc_cache or [])
 
@@ -642,8 +695,13 @@ class FontCache:
         self._load_fc_cache()
         return bool(self._cache_partial)
 
-    def fonts_with_coverage(self, codepoints: set[int], limit: int | None = 15) -> list[str]:
-        """Return font family names for installed fonts that cover at least one of the given codepoints (capped)."""
+    def fonts_with_coverage(
+        self, codepoints: set[int], limit: int | None = 15
+    ) -> list[str]:
+        """Return font family names covering given codepoints.
+
+        Returns fonts covering at least one of the given codepoints (capped).
+        """
         self._load_fc_cache()
         found: list[str] = []
         seen_fams: set[str] = set()
@@ -661,7 +719,11 @@ class FontCache:
                         from fontTools.ttLib import TTCollection
 
                         coll = TTCollection(path, lazy=True)
-                        tt = coll.fonts[font_index] if font_index < len(coll.fonts) else coll.fonts[0]
+                        tt = (
+                            coll.fonts[font_index]
+                            if font_index < len(coll.fonts)
+                            else coll.fonts[0]
+                        )
                     else:
                         tt = TTFont(path, lazy=True)
                     cmap = tt.getBestCmap() or {}
@@ -680,7 +742,10 @@ class FontCache:
         return found
 
     def _split_words(self, name: str) -> set[str]:
-        """Split a font name into lowercase word tokens (camelCase, underscores, spaces)."""
+        """Split a font name into lowercase word tokens.
+
+        Handles camelCase, underscores, spaces.
+        """
         import re
 
         tokens = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
@@ -804,11 +869,12 @@ class FontCache:
         stretch: str,
         ps_hint: str | None,
     ) -> tuple[Path, int] | None:
-        """Strict match: family must exist; weight/style must match token sets; no substitution.
+        """Strict match: family must exist; weight/style must match.
 
-        TTC-fix: Cache now stores each font face from TTC collections as a separate entry
-        with its font_index, so we can directly return the cached font_index without
-        needing to re-scan the TTC file at runtime."""
+        No substitution. TTC-fix: Cache stores each font face from TTC
+        collections as a separate entry with font_index, so we can directly
+        return the cached font_index without re-scanning at runtime.
+        """
         self._load_fc_cache()
         fam_norm = font_family.strip().lower()
         ps_norm = ps_hint.strip().lower() if ps_hint else None
@@ -816,7 +882,8 @@ class FontCache:
             self._build_style_label(weight, style, stretch)
         )
 
-        # best_candidate now stores (path, style_str, font_index) since cache has individual TTC entries
+        # best_candidate: (path, style_str, font_index)
+        # Cache has individual TTC entries
         best_candidate: tuple[Path, str, int] | None = None
         best_score: float | None = None
 
@@ -857,9 +924,11 @@ class FontCache:
         style: str = "normal",
         stretch: str = "normal",
     ) -> tuple[Path, int] | None:
-        """Use fontconfig to match fonts like a browser, but select the correct face inside
-        TTC collections based on weight/style/stretch tokens (e.g., choose Condensed face
-        instead of Regular when requested)."""
+        """Use fontconfig to match fonts like a browser.
+
+        Selects correct face inside TTC collections based on weight/style/stretch
+        tokens (e.g., choose Condensed face instead of Regular when requested).
+        """
         import subprocess
 
         def stretch_token(stretch: str) -> str | None:
@@ -881,7 +950,8 @@ class FontCache:
             self._build_style_label(weight, style, stretch)
         )
 
-        # Build candidate patterns from specific to generic to prefer Regular when available
+        # Build candidate patterns from specific to generic
+        # to prefer Regular when available
         style_name = self._weight_to_style(weight)
         patterns: list[str] = []
         if weight == 400 and style == "normal":
@@ -909,7 +979,9 @@ class FontCache:
         if font_family.lower() == "arial" and weight == 400 and style == "normal":
             patterns.insert(0, "Arial:style=Regular")
 
-        def pick_face(path: Path, preferred_style: str | None = None) -> tuple[Path, int]:
+        def pick_face(
+            path: Path, preferred_style: str | None = None
+        ) -> tuple[Path, int]:
             try:
                 if path.suffix.lower() == ".ttc":
                     from fontTools.ttLib import TTCollection
@@ -997,19 +1069,23 @@ class FontCache:
         inkscape_spec: str | None = None,
         strict_family: bool = True,
     ):
-        """Load font strictly; if exact face not found, return None (caller must abort unless strict_family=False).
+        """Load font strictly.
+
+        If exact face not found, return None (caller must abort unless
+        strict_family=False).
 
         Args:
             font_family: Font family name
             weight: CSS font-weight (100-900)
             style: CSS font-style
             stretch: CSS font-stretch
-            inkscape_spec: Optional Inkscape font specification hint (e.g., 'Futura Medium')
+            inkscape_spec: Optional Inkscape font spec hint (e.g. 'Futura Medium')
 
         Returns:
             (TTFont, font_blob_bytes, face_index) or None
         """
-        # Normalize generic Pango family names to CSS generics (but do NOT substitute specific faces)
+        # Normalize generic Pango family names to CSS generics
+        # (but do NOT substitute specific faces)
         generic_map = {
             "sans": "sans-serif",
             "sans-serif": "sans-serif",
@@ -1035,7 +1111,8 @@ class FontCache:
             )
 
             if match_result is None:
-                # Fallback to fontconfig best match (non-strict) to honor installed fonts
+                # Fallback to fontconfig best match (non-strict)
+                # to honor installed fonts
                 match_result = self._match_font_with_fc(
                     font_family, weight, style, stretch
                 )
@@ -1079,19 +1156,26 @@ class FontCache:
 
                     return re.sub(r"[^a-z0-9]+", "", s.lower().lstrip("."))
 
-                if strict_family and font_family.lower() not in ("sans-serif", "sans"):
-                    if _norm(fam_candidate) != _norm(font_family):
-                        # Allow subset match
-                        if _norm(font_family) not in _norm(fam_candidate):
-                            print(
-                                f"⚠️  Loaded font '{font_path.name}' but family mismatch ({fam_candidate}) for requested '{font_family}'. Using it anyway."
-                            )
-                            # return None  <-- RELAXED: Do not abort, use the best match we found
+                if (
+                    strict_family
+                    and font_family.lower() not in ("sans-serif", "sans")
+                    and _norm(fam_candidate) != _norm(font_family)
+                    and _norm(font_family) not in _norm(fam_candidate)
+                ):
+                    # Allow subset match - RELAXED:
+                    # Do not abort, use the best match we found
+                    print(
+                        f"Loaded font '{font_path.name}' but family "
+                        f"mismatch ({fam_candidate}) for requested "
+                        f"'{font_family}'. Using it anyway."
+                    )
 
                 self._fonts[cache_key] = (ttfont, font_blob, font_index)
-                print(
-                    f"✓ Loaded: {font_family} w={weight} s={style} st={stretch} → {font_path.name}:{font_index}"
+                msg = (
+                    f"Loaded: {font_family} w={weight} s={style} "
+                    f"st={stretch} -> {font_path.name}:{font_index}"
                 )
+                print(f"[OK] {msg}")
 
             except Exception as e:
                 print(f"✗ Failed to load {font_path}:{font_index}: {e}")
@@ -1103,7 +1187,8 @@ class FontCache:
 def recording_pen_to_svg_path(recording, precision: int = 28) -> str:
     """Convert RecordingPen recording to SVG path commands.
 
-    Precision is configurable; default 28 for maximum fidelity (matching previous behavior).
+    Precision is configurable; default 28 for maximum fidelity
+    (matching previous behavior).
     """
     fmt = f"{{:.{precision}f}}"
     commands = []
@@ -1118,14 +1203,17 @@ def recording_pen_to_svg_path(recording, precision: int = 28) -> str:
         elif op == "qCurveTo":
             # TrueType quadratic Bezier curve(s)
             # qCurveTo can have multiple points: (cp1, cp2, ..., cpN, end)
-            # If more than 2 points, there are implied on-curve points halfway between control points
+            # If more than 2 points, there are implied on-curve points
+            # halfway between control points
             if len(args) == 2:
                 # Simple case: one control point + end point
                 x1, y1 = args[0]
                 x, y = args[1]
-                commands.append(
-                    f"Q {fmt.format(x1)} {fmt.format(y1)} {fmt.format(x)} {fmt.format(y)}"
+                q_cmd = (
+                    f"Q {fmt.format(x1)} {fmt.format(y1)} "
+                    f"{fmt.format(x)} {fmt.format(y)}"
                 )
+                commands.append(q_cmd)
             else:
                 # Multiple control points - need to add implied on-curve points
                 # Last point is the end point, others are control points
@@ -1138,18 +1226,23 @@ def recording_pen_to_svg_path(recording, precision: int = 28) -> str:
                         # Implied on-curve point halfway to next control point
                         x2, y2 = args[i + 1]
                         x, y = (x1 + x2) / 2, (y1 + y2) / 2
-                    commands.append(
-                        f"Q {fmt.format(x1)} {fmt.format(y1)} {fmt.format(x)} {fmt.format(y)}"
+                    q_cmd = (
+                        f"Q {fmt.format(x1)} {fmt.format(y1)} "
+                        f"{fmt.format(x)} {fmt.format(y)}"
                     )
+                    commands.append(q_cmd)
         elif op == "curveTo":
             # Cubic Bezier curve
             if len(args) >= 3:
                 x1, y1 = args[0]
                 x2, y2 = args[1]
                 x, y = args[2]
-                commands.append(
-                    f"C {fmt.format(x1)} {fmt.format(y1)} {fmt.format(x2)} {fmt.format(y2)} {fmt.format(x)} {fmt.format(y)}"
+                c_cmd = (
+                    f"C {fmt.format(x1)} {fmt.format(y1)} "
+                    f"{fmt.format(x2)} {fmt.format(y2)} "
+                    f"{fmt.format(x)} {fmt.format(y)}"
                 )
+                commands.append(c_cmd)
         elif op == "closePath":
             commands.append("Z")
 
@@ -1278,8 +1371,8 @@ def text_to_path_rust_style(
     # Map CSS text-align to SVG text-anchor values
     style = text_elem.get("style", "")
     text_align_match = re.search(r"text-align:\s*(center|left|right)", style)
-    if (
-        text_align_match and (not text_anchor or text_anchor == "start")
+    if text_align_match and (
+        not text_anchor or text_anchor == "start"
     ):  # Only use if text-anchor not explicitly set
         text_align_map = {"center": "middle", "left": "start", "right": "end"}
         text_anchor = text_align_map.get(text_align_match.group(1), "start")
@@ -1315,9 +1408,10 @@ def text_to_path_rust_style(
         font_size = float(re.search(r"([\d.]+)", raw_size).group(1))
 
     # Spacing
-    # IMPORTANT (✱ gain ~50% diff reduction when spacing present):
-    # In earlier runs we failed to parse letter/word-spacing like "10" and treated them as 0,
-    # causing anchor widths to collapse and large left shifts (e.g., diff 14%→7%). Keep this robust parser.
+    # IMPORTANT (gain ~50% diff reduction when spacing present):
+    # In earlier runs we failed to parse letter/word-spacing like "10"
+    # and treated them as 0, causing anchor widths to collapse and
+    # large left shifts (e.g., diff 14%->7%). Keep this robust parser.
     raw_letter_spacing = get_attr(text_elem, "letter-spacing", None)
     letter_spacing = 0.0
     if raw_letter_spacing and raw_letter_spacing != "normal":
@@ -1343,9 +1437,7 @@ def text_to_path_rust_style(
     variation_wght = None
     variation_settings: list[tuple[str, float]] = []
     if fv_settings_str:
-        for tag, val in re.findall(
-            r"'([A-Za-z0-9]{4})'\s*([\d\.]+)", fv_settings_str
-        ):
+        for tag, val in re.findall(r"'([A-Za-z0-9]{4})'\s*([\d\.]+)", fv_settings_str):
             try:
                 num_val = float(val)
                 variation_settings.append((tag, num_val))
@@ -1358,9 +1450,7 @@ def text_to_path_rust_style(
     # OpenType variable axis 'opsz' and no explicit opsz is set, browsers
     # typically auto-set opsz to the computed font-size.
     font_optical_sizing = (
-        (get_attr(text_elem, "font-optical-sizing", "auto") or "auto")
-        .strip()
-        .lower()
+        (get_attr(text_elem, "font-optical-sizing", "auto") or "auto").strip().lower()
     )
 
     # Parse font-weight (use wght variation if present)
@@ -1386,7 +1476,8 @@ def text_to_path_rust_style(
     font_stretch = get_attr(text_elem, "font-stretch", "normal")
 
     # Extract inkscape-font-specification hint if present
-    # This helps with font matching, especially for TTC files where weight matching can fail
+    # This helps with font matching, especially for TTC files
+    # where weight matching can fail
     inkscape_spec_raw = get_attr(text_elem, "-inkscape-font-specification", None)
     inkscape_spec = None
     if inkscape_spec_raw:
@@ -1405,26 +1496,31 @@ def text_to_path_rust_style(
             wght_match = re.search(r"wght\s*=\s*(\d+)", spec_lower)
             if wght_match:
                 with contextlib.suppress(Exception):
-                    font_weight = int(
-                        max(100, min(900, float(wght_match.group(1))))
-                    )
+                    font_weight = int(max(100, min(900, float(wght_match.group(1)))))
 
-        if font_weight in (400, 500):  # adjust only if we didn't get a strong signal
-            # Break down common multi-word weight names (extra/ultra/semi/demi + light/bold/etc.)
+        if font_weight in (400, 500):  # adjust only if weak signal
+            # Break down common multi-word weight names
+            # (extra/ultra/semi/demi + light/bold/etc.)
             if has_token("black") or has_token("heavy"):
                 font_weight = 900
-            elif has_token("extrabold") or has_token("ultrabold") or (
-                (has_token("extra") or has_token("ultra")) and has_token("bold")
+            elif (
+                has_token("extrabold")
+                or has_token("ultrabold")
+                or ((has_token("extra") or has_token("ultra")) and has_token("bold"))
             ):
                 font_weight = 800
-            elif has_token("semibold") or has_token("demibold") or (
-                (has_token("semi") or has_token("demi")) and has_token("bold")
+            elif (
+                has_token("semibold")
+                or has_token("demibold")
+                or ((has_token("semi") or has_token("demi")) and has_token("bold"))
             ):
                 font_weight = 600
             elif has_token("medium"):
                 font_weight = 500
-            elif has_token("extralight") or has_token("ultralight") or (
-                (has_token("extra") or has_token("ultra")) and has_token("light")
+            elif (
+                has_token("extralight")
+                or has_token("ultralight")
+                or ((has_token("extra") or has_token("ultra")) and has_token("light"))
             ):
                 font_weight = 200
             elif has_token("light"):
@@ -1444,17 +1540,20 @@ def text_to_path_rust_style(
         inkscape_spec = spec_clean.split(",")[0].strip()
 
     # Note: We do NOT handle text-anchor/text-align here!
-    # The x, y coordinates in the SVG are already positioned correctly by the SVG renderer.
-    # Applying text-anchor adjustments would incorrectly shift the glyphs.
-    # We just use raw x, y coordinates and copy the transform attribute.
-    # The transform attribute (if any) will be copied to the path element later.
-    # The transform attribute (if any) will be copied to the path element later.
+    # The x, y coordinates in the SVG are already positioned correctly
+    # by the SVG renderer. Applying text-anchor adjustments would
+    # incorrectly shift the glyphs. We just use raw x, y coordinates
+    # and copy the transform attribute.
     if "No javascript" in text_content or text_elem.get("id") in ["text8", "text54"]:
         dbg(
-            f"DEBUG FONT ARGS for {text_elem.get('id')}: family='{font_family}' weight={font_weight} style='{font_style}' stretch='{font_stretch}' inkscape_spec='{inkscape_spec}'"
+            f"DEBUG FONT ARGS for {text_elem.get('id')}: "
+            f"family='{font_family}' weight={font_weight} style='{font_style}' "
+            f"stretch='{font_stretch}' inkscape_spec='{inkscape_spec}'"
         )
     dbg(
-        f"DEBUG RUN: '{text_content[:40]}' font={font_family} size={font_size} w={font_weight} style={font_style} stretch={font_stretch} inkscape_spec={inkscape_spec}"
+        f"DEBUG RUN: '{text_content[:40]}' font={font_family} size={font_size} "
+        f"w={font_weight} style={font_style} stretch={font_stretch} "
+        f"inkscape_spec={inkscape_spec}"
     )
 
     # 3. Load font using CSS properties (fontconfig matches like browsers do)
@@ -1521,8 +1620,10 @@ def text_to_path_rust_style(
         best_sym = None
         best_score = -1
         needed = {ord(ch) for ch in text_content}
+
         def dingbat_range(cp):
             return 0x2600 <= cp <= 0x27FF
+
         for fam in symbol_candidates:
             cand = font_cache.get_font(
                 fam,
@@ -1537,7 +1638,11 @@ def text_to_path_rust_style(
             tt = cand[0]
             cmap_c = tt.getBestCmap() or {}
             cover = sum(1 for cp in needed if cp in cmap_c and cmap_c[cp] != 0)
-            cover_ding = sum(1 for cp in needed if dingbat_range(cp) and cp in cmap_c and cmap_c[cp] != 0)
+            cover_ding = sum(
+                1
+                for cp in needed
+                if dingbat_range(cp) and cp in cmap_c and cmap_c[cp] != 0
+            )
             score = cover + cover_ding * 2
             if score > best_score:
                 best_score = score
@@ -1568,7 +1673,8 @@ def text_to_path_rust_style(
             if font_data:
                 break
 
-    # If still none and it's a symbol family, try direct system path to avoid fc substitution
+    # If still none and it's a symbol family, try direct system path
+    # to avoid fc substitution
     if not font_data and norm_fam in symbol_families:
         symbol_paths_mac = {
             "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
@@ -1587,25 +1693,24 @@ def text_to_path_rust_style(
             except Exception:
                 font_data = None
 
-    if not font_data or norm_fam in symbol_families:
-        # Force symbol primary to actual symbol font if available
-        if norm_fam in symbol_families:
-            symbol_paths_mac = {
-                "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
-                "wingdings": "/System/Library/Fonts/Supplemental/Wingdings.ttf",
-                "wingdings 2": "/System/Library/Fonts/Supplemental/Wingdings 2.ttf",
-                "wingdings 3": "/System/Library/Fonts/Supplemental/Wingdings 3.ttf",
-                "symbol": "/System/Library/Fonts/Supplemental/Symbol.ttf",
-            }
-            p = Path(symbol_paths_mac.get(norm_fam, ""))
-            if p.exists():
-                try:
-                    tt = TTFont(p, lazy=False)
-                    with open(p, "rb") as f:
-                        blob = f.read()
-                    font_data = (tt, blob, 0)
-                except Exception:
-                    font_data = None
+    # Force symbol primary to actual symbol font if available
+    if (not font_data or norm_fam in symbol_families) and norm_fam in symbol_families:
+        symbol_paths_mac = {
+            "webdings": "/System/Library/Fonts/Supplemental/Webdings.ttf",
+            "wingdings": "/System/Library/Fonts/Supplemental/Wingdings.ttf",
+            "wingdings 2": "/System/Library/Fonts/Supplemental/Wingdings 2.ttf",
+            "wingdings 3": "/System/Library/Fonts/Supplemental/Wingdings 3.ttf",
+            "symbol": "/System/Library/Fonts/Supplemental/Symbol.ttf",
+        }
+        p = Path(symbol_paths_mac.get(norm_fam, ""))
+        if p.exists():
+            try:
+                tt = TTFont(p, lazy=False)
+                with open(p, "rb") as f:
+                    blob = f.read()
+                font_data = (tt, blob, 0)
+            except Exception:
+                font_data = None
 
     if not font_data:
         font_data = font_cache.get_font(
@@ -1621,14 +1726,16 @@ def text_to_path_rust_style(
             font_weight,
             font_style,
             font_stretch,
-            f"Font '{font_family}' w={font_weight} s={font_style} st={font_stretch} not found",
+            f"Font '{font_family}' w={font_weight} s={font_style} "
+            f"st={font_stretch} not found",
         )
 
     ttfont, font_blob, font_index = font_data
 
-    # Auto-apply opsz for variable fonts when optical sizing is enabled and opsz is not explicitly set.
-    # Keep this limited to shaping (HarfBuzz variations); do not force outline instancing here to avoid
-    # regressions on variable-font samples with explicit font-variation-settings.
+    # Auto-apply opsz for variable fonts when optical sizing is enabled
+    # and opsz is not explicitly set. Keep this limited to shaping
+    # (HarfBuzz variations); do not force outline instancing here
+    # to avoid regressions on samples with explicit font-variation-settings.
     if font_optical_sizing != "none":
         try:
             if "fvar" in ttfont and not any(
@@ -1646,11 +1753,13 @@ def text_to_path_rust_style(
         except Exception:
             pass
 
-    # WARNING: DO NOT use fontTools.varLib.instancer to apply variable font instances to glyph
-    # outlines. Testing showed this causes significant regression (e.g., text39.svg with .New York
-    # variable font went from 18.52% to 25.03% diff). The instancer modifies glyph outlines in ways
-    # that don't match Chrome's variable font rendering. Chrome handles variation axes internally
-    # and applying instancer.instantiateVariableFont() produces different glyph shapes.
+    # WARNING: DO NOT use fontTools.varLib.instancer to apply variable
+    # font instances to glyph outlines. Testing showed this causes
+    # significant regression (e.g., text39.svg with .New York variable
+    # font went from 18.52% to 25.03% diff). The instancer modifies
+    # glyph outlines in ways that don't match Chrome's variable font
+    # rendering. Chrome handles variation axes internally and applying
+    # instancer.instantiateVariableFont() produces different shapes.
     # The correct approach is to:
     # 1. Pass variation_settings to HarfBuzz for shaping (already done)
     # 2. Let HarfBuzz apply variations to advance/positioning
@@ -1666,7 +1775,8 @@ def text_to_path_rust_style(
         print(f"    → Using font file: {ttfont.reader.file.name}")
     # Ensure all characters have glyphs in this font
     cmap = ttfont.getBestCmap() or {}
-    # Prefer Microsoft Symbol cmap (3,0) for symbol fonts even if getBestCmap is non-empty
+    # Prefer Microsoft Symbol cmap (3,0) for symbol fonts
+    # even if getBestCmap is non-empty
     if font_family.lower() in symbol_families and "cmap" in ttfont:
         cm = ttfont["cmap"].getcmap(3, 0)
         if cm and cm.cmap:
@@ -1679,12 +1789,16 @@ def text_to_path_rust_style(
     if not cmap:
         cmap = {}
     if font_family.lower() in symbol_families:
+        sample_keys = list(cmap.keys())[:5] if cmap else []
+        has_f04e = 0xF04E in cmap
         dbg(
-            f"DEBUG symbol cmap: len={len(cmap)} sample_keys={list(cmap.keys())[:5] if cmap else []} has_F04E={0xF04E in cmap}"
+            f"DEBUG symbol cmap: len={len(cmap)} sample_keys={sample_keys} "
+            f"has_F04E={has_f04e}"
         )
     try:
-        # Pass variation settings to getGlyphSet for correct variable font instance
-        # This uses fontTools' built-in interpolation, not instancer (which was tested and failed)
+        # Pass variation settings to getGlyphSet for correct variable font
+        # instance. Uses fontTools' built-in interpolation, not instancer
+        # (which was tested and failed)
         if variation_settings:
             location = dict(variation_settings)
             glyph_set_primary = ttfont.getGlyphSet(location=location)
@@ -1704,7 +1818,9 @@ def text_to_path_rust_style(
         return 0xF000 + cp if 0x20 <= cp <= 0xFF else cp
 
     def _has_glyph(tt, glyph_set, codepoint):
-        mapped_cp = _sym_map(codepoint) if font_family.lower() in symbol_families else codepoint
+        mapped_cp = (
+            _sym_map(codepoint) if font_family.lower() in symbol_families else codepoint
+        )
         if mapped_cp not in cmap or cmap.get(mapped_cp, 0) == 0:
             return False
         try:
@@ -1731,13 +1847,12 @@ def text_to_path_rust_style(
     dbg(f"DEBUG missing_chars initial: {missing_chars}")
     # For symbol fonts, ignore missing glyphs that are only spaces/PUA
     if font_family.lower() in symbol_families:
-        missing_chars = [
-            ch for ch in missing_chars if not ch.isspace()
-        ]
+        missing_chars = [ch for ch in missing_chars if not ch.isspace()]
     if font_family.lower() in symbol_families and missing_chars:
         missing_chars = []
     if font_family.lower() in symbol_families and missing_chars:
-        # For symbol fonts, if cmap has mapped entries, consider them present even if outlines empty
+        # For symbol fonts, if cmap has mapped entries, consider them
+        # present even if outlines empty
         still_missing = []
         for ch in missing_chars:
             mapped = _sym_map(ord(ch))
@@ -1862,7 +1977,10 @@ def text_to_path_rust_style(
                     if any(cp in temp_cmap for cp in cjk_chars_in_text):
                         dims = (
                             measure_bbox_with_font(
-                                input_svg_path, text_elem.get("id", ""), cjk_fam, weight=wgt
+                                input_svg_path,
+                                text_elem.get("id", ""),
+                                cjk_fam,
+                                weight=wgt,
                             )
                             if input_svg_path
                             else None
@@ -1875,17 +1993,25 @@ def text_to_path_rust_style(
                             if wgt:
                                 score += 0.01 * abs(wgt - font_weight)
                         else:
-                            score = -sum(1 for cp in cjk_chars_in_text if cp in temp_cmap)
+                            score = -sum(
+                                1 for cp in cjk_chars_in_text if cp in temp_cmap
+                            )
                         scored_cjk.append((score, cjk_fam, dims, temp_cmap, cjk_data))
                     else:
-                        print(f"    → Skipped CJK font {cjk_fam} (no coverage for text)")
+                        print(
+                            f"    → Skipped CJK font {cjk_fam} (no coverage for text)"
+                        )
 
         if scored_cjk:
             scored_cjk.sort(key=lambda x: x[0])
             # If Chrome detector found a match, bias toward it only when scores tie.
-            if chrome_detect_best and any(f == chrome_detect_best for _, f, _, _, _ in scored_cjk):
+            if chrome_detect_best and any(
+                f == chrome_detect_best for _, f, _, _, _ in scored_cjk
+            ):
                 best_score = scored_cjk[0][0]
-                chrome_entry = next((e for e in scored_cjk if e[1] == chrome_detect_best), None)
+                chrome_entry = next(
+                    (e for e in scored_cjk if e[1] == chrome_detect_best), None
+                )
                 if chrome_entry and abs(chrome_entry[0] - best_score) < 1e-6:
                     entry = chrome_entry
                 else:
@@ -1895,8 +2021,10 @@ def text_to_path_rust_style(
             _, _, _, temp_cmap, cjk_data = entry
             cjk_fam = entry[1]
             cjk_ttfont = cjk_data[0]
+            covers = sum(1 for cp in cjk_chars_in_text if cp in temp_cmap)
             print(
-                f"    → Loaded CJK fallback font: {cjk_fam} (covers {sum(1 for cp in cjk_chars_in_text if cp in temp_cmap)}/{len(cjk_chars_in_text)} chars)"
+                f"    -> Loaded CJK fallback font: {cjk_fam} "
+                f"(covers {covers}/{len(cjk_chars_in_text)} chars)"
             )
             cjk_cmap = temp_cmap
             cjk_glyph_set = cjk_ttfont.getGlyphSet()
@@ -1914,18 +2042,21 @@ def text_to_path_rust_style(
                 with contextlib.suppress(Exception):
                     cjk_hb_font.set_variations(dict(variation_settings))
 
-    # If we have a dedicated CJK fallback with coverage, don't force general fallback to handle those glyphs
+    # If we have a dedicated CJK fallback with coverage, don't force
+    # general fallback to handle those glyphs
     if cjk_cmap:
         missing_chars = [
             ch
             for ch in missing_chars
             if not (
-                0x3400 <= ord(ch) <= 0x9FFF and cjk_cmap.get(ord(ch), 0) not in (None, 0)
+                0x3400 <= ord(ch) <= 0x9FFF
+                and cjk_cmap.get(ord(ch), 0) not in (None, 0)
             )
         ]
 
     # Check for CJK script mismatch to force fallback
-    # (If we have CJK chars but loaded a non-CJK font like .SF Arabic Rounded, force fallback)
+    # (If we have CJK chars but loaded a non-CJK font like
+    # .SF Arabic Rounded, force fallback)
     cjk_indicators = [
         "cjk",
         "mincho",
@@ -1960,12 +2091,11 @@ def text_to_path_rust_style(
             ch for ch in cjk_chars if ord(ch) not in cmap or cmap.get(ord(ch), 0) == 0
         ]
         if cjk_cmap:
-            missing_cjk = [
-                ch for ch in missing_cjk if cjk_cmap.get(ord(ch), 0) == 0
-            ]
+            missing_cjk = [ch for ch in missing_cjk if cjk_cmap.get(ord(ch), 0) == 0]
         if missing_cjk:
             print(
-                f"    ℹ️  Detected CJK chars missing in non-CJK font '{font_family}'. Forcing fallback lookup."
+                f"    [i] Detected CJK chars missing in non-CJK font "
+                f"'{font_family}'. Forcing fallback lookup."
             )
             missing_chars.extend(missing_cjk)
             missing_chars = list(set(missing_chars))
@@ -2038,7 +2168,8 @@ def text_to_path_rust_style(
             for ch in chars:
                 code = ord(ch)
                 if 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:
-                    # Prefer Arial for Arabic as it often matches browser rendering better than Geeza Pro on some systems
+                    # Prefer Arial for Arabic as it often matches browser
+                    # rendering better than Geeza Pro on some systems
                     return [
                         "Arial",
                         "Geeza Pro",
@@ -2079,10 +2210,11 @@ def text_to_path_rust_style(
 
             return ["Apple Symbols", "Arial Unicode MS", "Last Resort"]
 
-        def _load_family_candidate(
-            family: str, avoid_tokens: list[str] | None = None
-        ):
-            """Load a candidate font by family name, optionally skipping file paths with tokens."""
+        def _load_family_candidate(family: str, avoid_tokens: list[str] | None = None):
+            """Load a candidate font by family name.
+
+            Optionally skipping file paths with tokens.
+            """
             font_cache._load_fc_cache()
             fam_norm = family.strip().lower()
             best = None
@@ -2092,9 +2224,15 @@ def text_to_path_rust_style(
                     fam_norm == f or fam_norm.lstrip(".") == f.lstrip(".") for f in fams
                 )
                 ps_norm = (ps or "").lower()
-                if not fam_hit and fam_norm != ps_norm and fam_norm.lstrip(".") != ps_norm.lstrip("."):
+                if (
+                    not fam_hit
+                    and fam_norm != ps_norm
+                    and fam_norm.lstrip(".") != ps_norm.lstrip(".")
+                ):
                     continue
-                if avoid_tokens and any(tok in path.name.lower() for tok in avoid_tokens):
+                if avoid_tokens and any(
+                    tok in path.name.lower() for tok in avoid_tokens
+                ):
                     continue
                 try:
                     score = abs((weight_val or 0) - font_weight)
@@ -2145,7 +2283,8 @@ def text_to_path_rust_style(
                     fb_names.append(fam)
         # ensure fb_names are plain strings
         fb_names = [f[0] if isinstance(f, tuple) else f for f in fb_names]
-        # Heuristic: when using SF Arabic, prefer SF Compact Rounded as fallback for ASCII/punctuation
+        # Heuristic: when using SF Arabic, prefer SF Compact Rounded
+        # as fallback for ASCII/punctuation
         if "sf arabic" in font_family.lower():
             preferred_sf_fb = [
                 "SF Compact Rounded",
@@ -2156,7 +2295,8 @@ def text_to_path_rust_style(
             for fam in reversed(preferred_sf_fb):
                 if fam not in fb_names:
                     fb_names.insert(0, fam)
-            # If all missing chars are ASCII, force the preferred SF fallback to be the primary candidate
+            # If all missing chars are ASCII, force the preferred SF fallback
+            # to be the primary candidate
             if all(ord(ch) < 256 for ch in missing_chars):
                 for fam in preferred_sf_fb:
                     cand = font_cache.get_font(
@@ -2239,7 +2379,9 @@ def text_to_path_rust_style(
             ]
             for fam in arabic_priority:
                 cand = None
-                avoid_tokens = ["condensed"] if fam.lower() == "noto sans arabic" else None
+                avoid_tokens = (
+                    ["condensed"] if fam.lower() == "noto sans arabic" else None
+                )
                 if avoid_tokens:
                     cand = _load_family_candidate(fam, avoid_tokens=avoid_tokens)
                 if not cand:
@@ -2272,7 +2414,12 @@ def text_to_path_rust_style(
             if not chrome_text:
                 chrome_text = "".join(missing_chars)
             chrome_best_fb = detect_chrome_font(
-                chrome_text, font_size, font_weight, fb_names, font_family, Path(__file__).parent.parent
+                chrome_text,
+                font_size,
+                font_weight,
+                fb_names,
+                font_family,
+                Path(__file__).parent.parent,
             )
         # bbox + weight grid chooser (only if Chrome didn't give us a decisive answer)
         best_fb = None
@@ -2291,7 +2438,9 @@ def text_to_path_rust_style(
                     base_weight=font_weight,
                 )
                 if src_path
-                else (fb_names[0], None) if fb_names else None
+                else (fb_names[0], None)
+                if fb_names
+                else None
             )
         best_family, best_weight = best_fb if best_fb else (None, None)
         fb_weight = int(
@@ -2326,7 +2475,8 @@ def text_to_path_rust_style(
             best_cover = len(missing_set)
             skip_coverage = True
             missing_set = set()
-        # If Chrome told us the exact fallback, try it first and lock it in if it covers anything
+        # If Chrome told us the exact fallback, try it first
+        # and lock it in if it covers anything
         if chrome_best_fb:
             candidate = font_cache.get_font(
                 chrome_best_fb,
@@ -2339,19 +2489,24 @@ def text_to_path_rust_style(
             if candidate:
                 tt_test, blob_test, idx_test = candidate
                 if not _font_has_outlines(tt_test):
-                    # Color-only fonts (e.g., Apple Color Emoji) lack outlines; fall back to next strategy
+                    # Color-only fonts (e.g., Apple Color Emoji) lack
+                    # outlines; fall back to next strategy
                     candidate = None
                 else:
                     cmap_test = tt_test.getBestCmap() or {}
                     cov = sum(
-                        1 for ch in missing_set if ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
+                        1
+                        for ch in missing_set
+                        if ord(ch) in cmap_test and cmap_test.get(ord(ch), 0) != 0
                     )
-                    # Trust Chrome: even if cov==0 (unlikely for outline fonts), use it first
+                    # Trust Chrome: even if cov==0 (unlikely for outline
+                    # fonts), use it first
                     fallback_font = candidate
                     fallback_cmap = cmap_test
                     best_cover = cov if cov > 0 else len(missing_set)
                     skip_coverage = True
-                    # if cov==0 we still assume Chrome rendered it; clear missing_set to avoid abort
+                    # if cov==0 we still assume Chrome rendered it;
+                    # clear missing_set to avoid abort
                     missing_set = (
                         {ch for ch in missing_set if ord(ch) not in cmap_test}
                         if cov > 0
@@ -2365,11 +2520,11 @@ def text_to_path_rust_style(
             return sum(
                 1
                 for ch in missing_set
-                if _sym_map(ord(ch)) in cmap
-                and cmap.get(_sym_map(ord(ch)), 0) != 0
+                if _sym_map(ord(ch)) in cmap and cmap.get(_sym_map(ord(ch)), 0) != 0
             )
 
-        # If no Chrome coverage, try bbox sampling on the missing chars to pick the closest visual match
+        # If no Chrome coverage, try bbox sampling on the missing chars
+        # to pick the closest visual match
         if not skip_coverage and missing_set:
             symbol_candidates = [
                 "Helvetica",
@@ -2403,17 +2558,21 @@ def text_to_path_rust_style(
             # keep bbox probing small to avoid loading many fonts
             if len(bbox_candidates) > 12:
                 bbox_candidates = bbox_candidates[:12]
-            bbox_best = score_candidates_by_bbox(
-                src_path,
-                list(missing_set),
-                font_family,
-                font_size,
-                fb_weight,
-                font_style,
-                font_stretch,
-                bbox_candidates,
-                sample_size=min(5, len(missing_set)),
-            ) if src_path else None
+            bbox_best = (
+                score_candidates_by_bbox(
+                    src_path,
+                    list(missing_set),
+                    font_family,
+                    font_size,
+                    fb_weight,
+                    font_style,
+                    font_stretch,
+                    bbox_candidates,
+                    sample_size=min(5, len(missing_set)),
+                )
+                if src_path
+                else None
+            )
             if bbox_best:
                 cand = font_cache.get_font(
                     bbox_best,
@@ -2476,7 +2635,8 @@ def text_to_path_rust_style(
                         fallback_font = candidate
                         fallback_cmap = cmap_test
                     if cov == len(missing_set):
-                        # stop scanning once full coverage is achieved to avoid loading more fonts
+                        # stop scanning once full coverage is achieved
+                        # to avoid loading more fonts
                         break
                 # If we've already achieved full coverage, exit outer loop too
                 if best_cover == len(missing_set):
@@ -2484,9 +2644,7 @@ def text_to_path_rust_style(
 
         # Dedicated symbol fallback for dingbats (keep separate from general fallback).
         if any(0x2600 <= ord(ch) <= 0x27FF for ch in missing_chars):
-            symbol_missing = [
-                ch for ch in missing_chars if 0x2600 <= ord(ch) <= 0x27FF
-            ]
+            symbol_missing = [ch for ch in missing_chars if 0x2600 <= ord(ch) <= 0x27FF]
             candidate = None
             best_symbol = None
             best_cov = -1
@@ -2572,7 +2730,8 @@ def text_to_path_rust_style(
             fallback_units_per_em = fallback_ttfont["head"].unitsPerEm
             fallback_scale = font_size / fallback_units_per_em
             fallback_glyph_set = fallback_ttfont.getGlyphSet()
-            # Remove chars now covered by the chosen fallback to avoid later promotion
+            # Remove chars now covered by the chosen fallback
+            # to avoid later promotion
             if fallback_cmap:
                 missing_chars = [
                     ch
@@ -2583,8 +2742,9 @@ def text_to_path_rust_style(
                 missing_set = set(missing_chars)
         else:
             fallback_ttfont = None
-        # For symbol fonts, if cmap contains the PUA-mapped chars, treat as covered even
-        # if glyph outline probing failed (many symbol fonts have empty glyphs for some entries).
+        # For symbol fonts, if cmap contains the PUA-mapped chars, treat
+        # as covered even if glyph outline probing failed (many symbol
+        # fonts have empty glyphs for some entries).
         if font_family.lower() in symbol_families and missing_chars:
             still_missing = []
             for ch in missing_chars:
@@ -2602,10 +2762,12 @@ def text_to_path_rust_style(
                 font_weight,
                 font_style,
                 font_stretch,
-                f"Glyphs missing for chars '{uniq}' in font '{font_family}' and fallback",
+                f"Glyphs missing for chars '{uniq}' in font "
+                f"'{font_family}' and fallback",
             )
 
-    # If primary is a symbol font, force primary to an outline-capable symbol font (PUA mapped)
+    # If primary is a symbol font, force primary to an outline-capable
+    # symbol font (PUA mapped)
     if font_family.lower() in symbol_families:
         symbol_priority = [
             "Webdings",
@@ -2634,13 +2796,19 @@ def text_to_path_rust_style(
                     cmap = ttfont.getBestCmap() or {}
                     glyph_set = ttfont.getGlyphSet()
                     hb_font = hb.Font(hb.Face(hb.Blob(font_blob), font_index))
-                    hb_font.scale = (ttfont["head"].unitsPerEm, ttfont["head"].unitsPerEm)
+                    hb_font.scale = (
+                        ttfont["head"].unitsPerEm,
+                        ttfont["head"].unitsPerEm,
+                    )
                     font_family = fam  # adopt outline symbol font as primary
                     break
 
-    # If all chars are missing in the primary and a fallback covers everything, promote it to primary
+    # If all chars are missing in the primary and a fallback covers
+    # everything, promote it to primary
     if missing_chars and len(missing_chars) == len(text_content):
-        print(f"DEBUG promote fallback id={text_elem.get('id')} missing={missing_chars}")
+        print(
+            f"DEBUG promote fallback id={text_elem.get('id')} missing={missing_chars}"
+        )
         if cjk_ttfont and cjk_cmap and all(ord(ch) in cjk_cmap for ch in text_content):
             print("    → Switching primary to CJK fallback for full coverage")
             ttfont = cjk_ttfont
@@ -2648,8 +2816,10 @@ def text_to_path_rust_style(
             glyph_set = cjk_glyph_set
             hb_font = cjk_hb_font
             missing_chars = []
-        elif fallback_ttfont and fallback_cmap and all(
-            ord(ch) in fallback_cmap for ch in text_content
+        elif (
+            fallback_ttfont
+            and fallback_cmap
+            and all(ord(ch) in fallback_cmap for ch in text_content)
         ):
             print("    → Switching primary to general fallback for full coverage")
             ttfont = fallback_ttfont
@@ -2663,8 +2833,8 @@ def text_to_path_rust_style(
     scale = font_size / units_per_em
     if text_elem.get("id") == "text4" or "兛" in text_content:
         dbg(f"DEBUG text4: metrics upem={units_per_em} scale={scale}")
-    # Note: transform_sx and transform_sy will be applied when generating path coordinates
-    # but NOT to the font_size itself (transform is on the element, not the font)
+    # Note: transform_sx and transform_sy will be applied when generating
+    # path coordinates but NOT to font_size (transform is on element)
 
     # Font coordinates have Y going up, SVG has Y going down
     # We need to flip Y, so we'll negate in the transform
@@ -2694,7 +2864,11 @@ def text_to_path_rust_style(
             for char in text_content:
                 # Determine direction
                 bidi_class = unicodedata.bidirectional(char)
-                if bidi_class in ("R", "AL", "RLE", "RLO") or bidi_class == "AN" and has_arabic_letters:
+                if (
+                    bidi_class in ("R", "AL", "RLE", "RLO")
+                    or bidi_class == "AN"
+                    and has_arabic_letters
+                ):
                     direction = "RTL"
                 elif bidi_class in ("L", "LRE", "LRO"):
                     direction = "LTR"
@@ -2796,7 +2970,8 @@ def text_to_path_rust_style(
 
         if text_content and len(text_content) == 1 and text_content in "☰":
             dbg(
-                f"DEBUG icon '{text_content}': font_index={font_index}, ttfont_face={ttfont}, hb_face_index={hb_face.index}"
+                f"DEBUG icon '{text_content}': font_index={font_index}, "
+                f"ttfont_face={ttfont}, hb_face_index={hb_face.index}"
             )
         if "兛" in text_content or text_elem.get("id") == "text4":
             dbg("DEBUG text4: HarfBuzz font created successfully")
@@ -2829,9 +3004,11 @@ def text_to_path_rust_style(
             feature_settings = []
 
     # 7. Chunk layout and anchor computation (per Inkscape plain-SVG behavior)
-    # Split runs into chunks by font coverage and accumulate widths before anchoring.
-    # This also gives us per-chunk metrics for underline placement.
-    chunk_list = []  # list of dicts: {start,end,font_key,width,positions,infos,ttfont,glyph_set,scale,cmap}
+    # Split runs into chunks by font coverage and accumulate widths
+    # before anchoring. Also gives per-chunk metrics for underline.
+    # chunk_list items: {start,end,font_key,width,positions,infos,
+    #                    ttfont,glyph_set,scale,cmap}
+    chunk_list = []
 
     import bisect
 
@@ -2899,10 +3076,15 @@ def text_to_path_rust_style(
             # false "missing glyph" errors (e.g., Webdings text52).
             pua_cp = cp if cp >= 0xF000 else 0xF000 + cp
             if is_symbol:
+                in_cmap = pua_cp in cmap if cmap else False
+                cmap_val = cmap.get(pua_cp) if cmap else None
+                primary_name = getattr(ttfont.reader.file, "name", "")
                 dbg(
-                    f"DEBUG symbol seg: cp=0x{cp:04X} pua_cp=0x{pua_cp:04X} in_cmap={pua_cp in cmap if cmap else False} val={cmap.get(pua_cp) if cmap else None} primary={getattr(ttfont.reader.file, 'name', '')}"
+                    f"DEBUG symbol seg: cp=0x{cp:04X} pua_cp=0x{pua_cp:04X} "
+                    f"in_cmap={in_cmap} val={cmap_val} primary={primary_name}"
                 )
-                # Trust symbol fonts: they often lack Unicode cmap; we already picked a symbol font.
+                # Trust symbol fonts: they often lack Unicode cmap;
+                # we already picked a symbol font.
                 font_key = "primary"
                 if current_font is None:
                     current_font = font_key
@@ -2915,8 +3097,11 @@ def text_to_path_rust_style(
                 continue
 
             if 0x4E00 <= cp <= 0x9FFF:
+                in_cjk = cp in cjk_cmap if cjk_cmap else "None"
+                in_fb = cp in fallback_cmap if fallback_cmap else "None"
                 print(
-                    f"DEBUG CJK: cp={cp} in_cjk={cp in cjk_cmap if cjk_cmap else 'None'} in_fallback={cp in fallback_cmap if fallback_cmap else 'None'} in_primary={cp in cmap}"
+                    f"DEBUG CJK: cp={cp} in_cjk={in_cjk} "
+                    f"in_fallback={in_fb} in_primary={cp in cmap}"
                 )
 
             if is_symbol and pua_cp in cmap and cmap.get(pua_cp, 0) != 0:
@@ -2950,7 +3135,8 @@ def text_to_path_rust_style(
             ):
                 if 0x0600 <= cp <= 0x06FF and fallback_ttfont:
                     dbg(
-                        f"DEBUG ARABIC: cp={cp} found in fallback {fallback_ttfont.reader.file.name}"
+                        f"DEBUG ARABIC: cp={cp} found in fallback "
+                        f"{fallback_ttfont.reader.file.name}"
                     )
                 font_key = "fallback"
             elif cjk_cmap and cp in cjk_cmap and cjk_cmap.get(cp, 0) != 0:
@@ -2984,7 +3170,8 @@ def text_to_path_rust_style(
                 local_byte_offsets.append(acc_local)
             # Debug print
             dbg(
-                f"DEBUG layout_line: font_family='{font_family}' font_key='{font_key}' text='{seg_text}'"
+                f"DEBUG layout_line: font_family='{font_family}' "
+                f"font_key='{font_key}' text='{seg_text}'"
             )
             if font_key == "primary":
                 seg_ttfont = ttfont
@@ -2994,7 +3181,8 @@ def text_to_path_rust_style(
                 seg_cmap = cmap
                 if "text4" in str(text_elem.get("id")) or "兛" in text_content:
                     dbg(
-                        f"DEBUG text4: Using PRIMARY font. Scale={scale}, UnitsPerEm={units_per_em}"
+                        f"DEBUG text4: Using PRIMARY font. Scale={scale}, "
+                        f"UnitsPerEm={units_per_em}"
                     )
             elif font_key == "cjk":
                 seg_ttfont = cjk_ttfont
@@ -3005,8 +3193,11 @@ def text_to_path_rust_style(
                 if "text4" in str(text_elem.get("id")) or "兛" in text_content:
                     dbg(f"DEBUG text4: Using CJK font. Scale={cjk_scale}")
                     if cjk_ttfont:
-                        dbg(f"DEBUG text4: CJK Font Name: {cjk_ttfont.reader.file.name}")
-                        dbg(f"DEBUG text4: CJK UnitsPerEm: {cjk_ttfont['head'].unitsPerEm}")
+                        dbg(
+                            f"DEBUG text4: CJK Font Name: {cjk_ttfont.reader.file.name}"
+                        )
+                        cjk_upm = cjk_ttfont["head"].unitsPerEm
+                        dbg(f"DEBUG text4: CJK UnitsPerEm: {cjk_upm}")
             elif font_key == "symbol":
                 seg_ttfont = symbol_ttfont
                 seg_scale = symbol_scale
@@ -3016,7 +3207,8 @@ def text_to_path_rust_style(
                 if "text4" in str(text_elem.get("id")) or "兛" in text_content:
                     dbg(f"DEBUG text4: Using SYMBOL font. Scale={symbol_scale}")
                     if symbol_ttfont and hasattr(symbol_ttfont, "reader"):
-                        dbg(f"DEBUG text4: Symbol Font Name: {symbol_ttfont.reader.file.name}")
+                        sym_name = symbol_ttfont.reader.file.name
+                        dbg(f"DEBUG text4: Symbol Font Name: {sym_name}")
             else:  # fallback
                 seg_ttfont = fallback_ttfont
                 seg_scale = fallback_scale
@@ -3026,8 +3218,10 @@ def text_to_path_rust_style(
                 if "text4" in str(text_elem.get("id")) or "兛" in text_content:
                     dbg(f"DEBUG text4: Using FALLBACK font. Scale={fallback_scale}")
                     if fallback_ttfont:
-                        dbg(f"DEBUG text4: Fallback Font Name: {fallback_ttfont.reader.file.name}")
-                        dbg(f"DEBUG text4: Fallback UnitsPerEm: {fallback_ttfont['head'].unitsPerEm}")
+                        fb_name = fallback_ttfont.reader.file.name
+                        dbg(f"DEBUG text4: Fallback Font Name: {fb_name}")
+                        fb_upm = fallback_ttfont["head"].unitsPerEm
+                        dbg(f"DEBUG text4: Fallback UnitsPerEm: {fb_upm}")
 
             buf = hb.Buffer()
 
@@ -3050,7 +3244,8 @@ def text_to_path_rust_style(
             else:
                 if text_elem.get("id") == "text52":
                     print(
-                        f"    DEBUG text52: font_key={font_key} family='{font_family}' seg_text='{seg_text}'"
+                        f"    DEBUG text52: font_key={font_key} "
+                        f"family='{font_family}' seg_text='{seg_text}'"
                     )
                 # Remap to PUA for symbol fonts if needed (fallback path)
                 # We detect symbol fonts by name. This is a heuristic.
@@ -3093,9 +3288,13 @@ def text_to_path_rust_style(
                     dbg(f"  Font file: {seg_ttfont.reader.file.name}")
                 dbg(f"  Scale: {seg_scale}")
                 dbg("  Glyphs:")
-                for i, (info, pos) in enumerate(zip(seg_infos, seg_positions, strict=False)):
+                for i, (info, pos) in enumerate(
+                    zip(seg_infos, seg_positions, strict=False)
+                ):
                     dbg(
-                        f"    [{i}] char_idx={info.cluster} codepoint={info.codepoint} x_adv={pos.x_advance} x_off={pos.x_offset} y_off={pos.y_offset}"
+                        f"    [{i}] char_idx={info.cluster} cp={info.codepoint} "
+                        f"x_adv={pos.x_advance} x_off={pos.x_offset} "
+                        f"y_off={pos.y_offset}"
                     )
 
             width = sum(p.x_advance for p in seg_positions) * (seg_scale or 1.0)
@@ -3129,7 +3328,8 @@ def text_to_path_rust_style(
 
     path_len = path_obj.length() if path_obj is not None else None
 
-    # Group chunks by baseline (y) to anchor per line (handles multiple tspans sharing a line)
+    # Group chunks by baseline (y) to anchor per line
+    # (handles multiple tspans sharing a line)
     lines: list[list[dict]] = []
     current_line = []
     last_y = y
@@ -3150,7 +3350,10 @@ def text_to_path_rust_style(
         lines.append(current_line)
 
     def _measure_line_width(line_chunks: list[dict]) -> float:
-        """Compute visual line width like Inkscape: sum advances & dx/spacing; trim trailing spacing."""
+        """Compute visual line width like Inkscape.
+
+        Sum advances & dx/spacing; trim trailing spacing.
+        """
         width = 0.0
         last_letter = 0.0
         last_word = 0.0
@@ -3196,7 +3399,7 @@ def text_to_path_rust_style(
 
             if DEBUG_ENABLED and "No javascript" in run_text:
                 dbg(
-                    "DEBUG MEASURE: run_text='%s' glyph_count=%s cursor=%s width_so_far=%s",
+                    "DEBUG MEASURE: run='%s' glyphs=%s cursor=%s width=%s",
                     run_text,
                     len(seg_infos),
                     cursor,
@@ -3223,10 +3426,20 @@ def text_to_path_rust_style(
             line_anchor_offset = -line_width if align_dir == "RTL" else 0.0
 
         # Debug for Arabic text (text44 scenario)
-        has_arabic = any("\u0600" <= c <= "\u06ff" for c in text_content[:20]) if text_content else False
+        has_arabic = (
+            any("\u0600" <= c <= "\u06ff" for c in text_content[:20])
+            if text_content
+            else False
+        )
         if DEBUG_ENABLED and has_arabic:
-            print(f"DEBUG ANCHOR: anchor={text_anchor} base_dir={base_dir} align_dir={align_dir} line_dirs={line_dirs} line_width={line_width:.2f} offset={line_anchor_offset:.2f}")
-            print(f"DEBUG POS: x={x:.2f} y={y:.2f} current_x={x + line_anchor_offset:.2f}")
+            print(
+                f"DEBUG ANCHOR: anchor={text_anchor} base_dir={base_dir} "
+                f"align_dir={align_dir} line_dirs={line_dirs} "
+                f"line_width={line_width:.2f} offset={line_anchor_offset:.2f}"
+            )
+            print(
+                f"DEBUG POS: x={x:.2f} y={y:.2f} current_x={x + line_anchor_offset:.2f}"
+            )
 
         line_baseline = line_chunks[0].get("line_y", y) if line_chunks else y
 
@@ -3261,8 +3474,8 @@ def text_to_path_rust_style(
 
         # Unified cursor for mixed BiDi flow
         # We process chunks in logical order (as they appear in the list)
-        # and advance a single cursor. This ensures "100% " (LTR) comes before "ARABIC" (RTL)
-        # in the visual layout if that's how they are ordered in the runs.
+        # and advance a single cursor. This ensures "100% " (LTR) comes
+        # before "ARABIC" (RTL) in the visual layout if ordered that way.
 
         current_x = x + line_anchor_offset
 
@@ -3282,7 +3495,10 @@ def text_to_path_rust_style(
 
             if DEBUG_ENABLED and "No javascript" in text_content:
                 print(
-                    f"DEBUG LAYOUT: font={font_family} x={x} line_width={line_width} anchor={text_anchor} offset={line_anchor_offset} dir={chunk_dir} chunk_width={chunk_width}"
+                    f"DEBUG LAYOUT: font={font_family} x={x} "
+                    f"line_width={line_width} anchor={text_anchor} "
+                    f"offset={line_anchor_offset} dir={chunk_dir} "
+                    f"chunk_width={chunk_width}"
                 )
 
             # Determine start position for this chunk
@@ -3301,12 +3517,14 @@ def text_to_path_rust_style(
                 # But wait, if the chunk is RTL, the glyphs inside might need
                 # to be offset differently.
                 # If we use the same logic as before:
-                # chunk_start = x + line_anchor_offset + (line_width - rtl_cursor - chunk_width)
+                # chunk_start = x + line_anchor_offset +
+                #     (line_width - rtl_cursor - chunk_width)
                 # That was for right-aligned pile.
 
                 # For inline RTL:
                 # The chunk starts at current_x.
-                # We need to ensure the glyphs land in [current_x, current_x + chunk_width].
+                # We need to ensure the glyphs land in
+                # [current_x, current_x + chunk_width].
                 # If we rely on the 'cursor' logic inside the loop:
                 # It initializes 'cursor' to 0 (or chunk_width for RTL?).
                 pass
@@ -3328,8 +3546,9 @@ def text_to_path_rust_style(
             # if chunk_dir == 'RTL':
             #     chunk_cursor = chunk_width # WRONG if chunk_origin is already shifted
 
-            # For mixed-direction lines, HarfBuzz already outputs RTL glyphs in visual order.
-            # For pure RTL lines, use right-edge placement with reversed iteration.
+            # For mixed-direction lines, HarfBuzz already outputs RTL glyphs
+            # in visual order.
+            # For pure RTL lines, use right-edge placement with reversed iter.
             if chunk_dir == "RTL" and not mixed_dir:
                 chunk_origin = current_x + chunk_width
             else:
@@ -3342,16 +3561,18 @@ def text_to_path_rust_style(
                     acc_local += len(ch.encode("utf-8"))
                     local_byte_offsets.append(acc_local)
 
-            # For pure RTL text, reverse iteration order to process rightmost glyph first
-            # HarfBuzz outputs glyphs in visual left-to-right order, but our RTL positioning
-            # logic (chunk_cursor -= adv) expects right-to-left iteration
+            # For pure RTL text, reverse iteration order to process
+            # rightmost glyph first.
+            # HarfBuzz outputs glyphs in visual left-to-right order, but our
+            # RTL positioning logic (chunk_cursor -= adv) expects R-to-L iter
             if chunk_dir == "RTL" and not mixed_dir:
                 glyph_pairs = list(zip(seg_infos, seg_positions, strict=False))[::-1]
             else:
                 glyph_pairs = list(zip(seg_infos, seg_positions, strict=False))
 
             for info, pos in glyph_pairs:
-                # HarfBuzz returns codepoint indices (not byte indices) when using add_str with Python strings
+                # HarfBuzz returns codepoint indices (not byte indices) when
+                # using add_str with Python strings
                 cluster = info.cluster
                 char_idx_local = max(
                     0, bisect.bisect_right(local_byte_offsets, cluster) - 1
@@ -3383,10 +3604,20 @@ def text_to_path_rust_style(
                     glyph_origin = chunk_origin + chunk_cursor
                     chunk_cursor += adv
 
-                # Debug all glyphs for char_idx 4 (the multi-glyph Arabic char) to verify fix
-                has_arabic_debug = any("\u0600" <= c <= "\u06ff" for c in text_content[:5]) if text_content else False
+                # Debug all glyphs for char_idx 4 (multi-glyph Arabic char)
+                has_arabic_debug = (
+                    any("\u0600" <= c <= "\u06ff" for c in text_content[:5])
+                    if text_content
+                    else False
+                )
                 if DEBUG_ENABLED and has_arabic_debug and char_idx == 4:
-                    print(f"DEBUG GLYPH[{char_idx}]: char='{text_content[char_idx]}' dx={current_dx:.2f} adv={adv:.2f} chunk_origin={chunk_origin:.2f} chunk_cursor={chunk_cursor:.2f} glyph_origin={glyph_origin:.2f}")
+                    print(
+                        f"DEBUG GLYPH[{char_idx}]: char='{text_content[char_idx]}' "
+                        f"dx={current_dx:.2f} adv={adv:.2f} "
+                        f"chunk_origin={chunk_origin:.2f} "
+                        f"chunk_cursor={chunk_cursor:.2f} "
+                        f"glyph_origin={glyph_origin:.2f}"
+                    )
 
                 glyph_id = info.codepoint
                 try:
@@ -3404,13 +3635,25 @@ def text_to_path_rust_style(
                         dbg(f"    DEBUG PEN VALUE: {pen.value}")
                         if pen.value:
                             has_path = True
+                    char_val = (
+                        text_content[char_idx] if char_idx < len(text_content) else "?"
+                    )
+                    cp_val = (
+                        ord(text_content[char_idx])
+                        if char_idx < len(text_content)
+                        else -1
+                    )
                     dbg(
-                        f"    DEBUG_GLYPH: char='{text_content[char_idx] if char_idx < len(text_content) else '?'}' cp={ord(text_content[char_idx]) if char_idx < len(text_content) else -1} gid={glyph_id} name={glyph_name} has_path={has_path} cluster={cluster} char_idx={char_idx}"
+                        f"    DEBUG_GLYPH: char='{char_val}' cp={cp_val} "
+                        f"gid={glyph_id} name={glyph_name} "
+                        f"has_path={has_path} cluster={cluster} idx={char_idx}"
                     )
 
                     if "兛" in text_content:
+                        elem_id = text_elem.get("id")
                         dbg(
-                            f"    DEBUG COND CHECK: has_path={has_path} content='{text_content}' id='{text_elem.get('id')}'"
+                            f"    DEBUG COND CHECK: has_path={has_path} "
+                            f"content='{text_content}' id='{elem_id}'"
                         )
                     if has_path and (
                         "No javascript" in text_content
@@ -3432,8 +3675,8 @@ def text_to_path_rust_style(
 
                     sys.stdout.flush()
 
-                # If glyph_name is None or not in seg_glyph_set, it's truly missing.
-                # If glyph_name is '.notdef' or glyph_id is 0, we check if it has a path.
+                # If glyph_name is None or not in seg_glyph_set, it's missing.
+                # If glyph_name is '.notdef' or glyph_id is 0, check path.
                 glyph_is_notdef_or_zero = glyph_name == ".notdef" or glyph_id == 0
 
                 glyph = seg_glyph_set.get(glyph_name) if glyph_name else None
@@ -3447,11 +3690,16 @@ def text_to_path_rust_style(
                         and fallback_ttfont
                         and fallback_cmap
                         and _sym_map(ord(text_content[char_idx])) in fallback_cmap
-                        and fallback_cmap.get(_sym_map(ord(text_content[char_idx])), 0) != 0
+                        and fallback_cmap.get(_sym_map(ord(text_content[char_idx])), 0)
+                        != 0
                     ):
                         try:
                             fb_buf = hb.Buffer()
-                            ch_code = _sym_map(ord(text_content[char_idx])) if font_family.lower() in symbol_families else ord(text_content[char_idx])
+                            ch_code = (
+                                _sym_map(ord(text_content[char_idx]))
+                                if font_family.lower() in symbol_families
+                                else ord(text_content[char_idx])
+                            )
                             fb_buf.add_str(chr(ch_code))
                             fb_buf.direction = "rtl" if direction == "RTL" else "ltr"
                             fb_buf.guess_segment_properties()
@@ -3471,7 +3719,9 @@ def text_to_path_rust_style(
                                 fb_pen = DecomposingRecordingPen(fallback_glyph_set)
                                 fb_glyph.draw(fb_pen)
                                 recording = fb_pen.value
-                                seg_scale = fallback_scale  # use fallback scale for this glyph
+                                seg_scale = (
+                                    fallback_scale  # use fallback scale for this glyph
+                                )
                                 pos = fb_pos
                                 glyph_name = fb_name
                                 glyph_is_notdef_or_zero = False
@@ -3480,7 +3730,9 @@ def text_to_path_rust_style(
                             drew_fallback = False
 
                     if not drew_fallback:
-                        adv_na = (pos.x_advance * seg_scale) + current_dx + letter_spacing
+                        adv_na = (
+                            (pos.x_advance * seg_scale) + current_dx + letter_spacing
+                        )
                         if text_content[char_idx : char_idx + 1] == " ":
                             adv_na += word_spacing
                         if chunk_dir == "RTL":
@@ -3489,7 +3741,11 @@ def text_to_path_rust_style(
                             chunk_cursor += adv_na
                         continue
 
-                pen = DecomposingRecordingPen(seg_glyph_set if glyph_name in (seg_glyph_set or {}) else fallback_glyph_set)
+                pen = DecomposingRecordingPen(
+                    seg_glyph_set
+                    if glyph_name in (seg_glyph_set or {})
+                    else fallback_glyph_set
+                )
                 try:
                     glyph.draw(pen)
                 except Exception as e:
@@ -3498,9 +3754,9 @@ def text_to_path_rust_style(
                     if text_content[char_idx : char_idx + 1] == " ":
                         adv_na += word_spacing
                     if chunk_dir == "RTL":
-                        cursor_chunk -= adv_na
+                        chunk_cursor -= adv_na
                     else:
-                        cursor_chunk += adv_na
+                        chunk_cursor += adv_na
                     continue
                 recording = pen.value
 
@@ -3598,10 +3854,11 @@ def text_to_path_rust_style(
                         elif op == "qCurveTo":
                             new_args = []
                             # Handle implied on-curve points (None) in qCurveTo
-                            # TrueType quadratic splines can have off-curve points with implied on-curve midpoints.
-                            # However, RecordingPen usually delivers explicit points.
-                            # If we get None, it's likely an implied point.
-                            # We need to interpolate it from the previous and next points.
+                            # TrueType quadratic splines can have off-curve
+                            # points with implied on-curve midpoints.
+                            # However, RecordingPen usually delivers explicit
+                            # points. If we get None, it's likely an implied
+                            # point. We need to interpolate from prev and next.
 
                             # Flatten the list of points, handling None
                             clean_points = []
@@ -3610,7 +3867,8 @@ def text_to_path_rust_style(
                                     clean_points.append(point)
                                 else:
                                     # Interpolate midpoint between prev and next
-                                    # Note: This is a simplification. Real TT handling is more complex.
+                                    # Note: This is a simplification. Real TT
+                                    # handling is more complex.
                                     # But for drawing, we just need a coordinate.
                                     if (
                                         i > 0
@@ -3627,7 +3885,7 @@ def text_to_path_rust_style(
                                         # End of list None? Use prev point (degenerate)
                                         clean_points.append(args[i - 1])
                                     else:
-                                        # Start of list None? Should not happen for qCurveTo
+                                        # Start of list None? Shouldn't happen
                                         clean_points.append((0, 0))  # Fallback
 
                             for px, py in clean_points:
@@ -3733,13 +3991,19 @@ def text_to_path_rust_style(
                         a, b, c, d, e, f = baked_matrix
                         px, py = (a * px + c * py + e, b * px + d * py + f)
                     pts.append((px, py))
-                deco_path = f"M {fmt.format(pts[0][0])} {fmt.format(pts[0][1])} L {fmt.format(pts[1][0])} {fmt.format(pts[1][1])} L {fmt.format(pts[2][0])} {fmt.format(pts[2][1])} L {fmt.format(pts[3][0])} {fmt.format(pts[3][1])} Z"
+                deco_path = (
+                    f"M {fmt.format(pts[0][0])} {fmt.format(pts[0][1])} "
+                    f"L {fmt.format(pts[1][0])} {fmt.format(pts[1][1])} "
+                    f"L {fmt.format(pts[2][0])} {fmt.format(pts[2][1])} "
+                    f"L {fmt.format(pts[3][0])} {fmt.format(pts[3][1])} Z"
+                )
                 all_paths.append(deco_path)
 
     if not all_paths:
+        chunk_info = [len(ch["infos"]) for ch in chunk_list] if chunk_list else []
         print(
             f"  ✗ No path data generated for text '{text_content}' "
-            f"(chunks={len(chunk_list)} infos={[len(ch['infos']) for ch in chunk_list] if chunk_list else []})"
+            f"(chunks={len(chunk_list)} infos={chunk_info})"
         )
         return None
 
@@ -3779,128 +4043,147 @@ def text_to_path_rust_style(
 
     # Handle text-decoration (underline, line-through)
     decoration = get_attr(text_elem, "text-decoration", "none")
-    if decoration != "none":
-        # We need font metrics to position the decoration
-        # Use the first run's font metrics as a baseline
-        if runs and runs[0][0] < len(text_content):
-            # Find the font used for the first run
-            # This is a simplification; ideally we'd check each run's font
-            # but usually decoration is consistent across the element
+    # We need font metrics to position the decoration
+    # Use the first run's font metrics as a baseline
+    if decoration != "none" and runs and runs[0][0] < len(text_content):
+        # Find the font used for the first run
+        # This is a simplification; ideally we'd check each run's font
+        # but usually decoration is consistent across the element
 
-            # Re-resolve the font for metrics (we didn't store the TTFont object in a way easily accessible here,
-            # but we can grab it from the cache using the same params)
-            # Actually, we can just use the metrics from the first chunk of the first line if available
+        # Re-resolve the font for metrics (we didn't store TTFont in an
+        # easily accessible way, but we can grab it from the cache using
+        # the same params). Actually, we can just use the metrics from
+        # the first chunk of the first line if available
 
-            # Let's look at the first chunk of the first line
-            first_chunk = None
-            if lines and lines[0]:
-                first_chunk = lines[0][0]
+        # Let's look at the first chunk of the first line
+        first_chunk = None
+        if lines and lines[0]:
+            first_chunk = lines[0][0]
 
-            if first_chunk:
-                ttfont = first_chunk["ttfont"]
-                units_per_em = ttfont["head"].unitsPerEm
-                scale = font_size / units_per_em  # This is the font scale
+        if first_chunk:
+            ttfont = first_chunk["ttfont"]
+            units_per_em = ttfont["head"].unitsPerEm
+            scale = font_size / units_per_em  # This is the font scale
 
-                # Get underline/strikeout metrics from 'post' or 'OS/2' table
-                underline_position = -100  # Default
-                underline_thickness = 50  # Default
-                strikeout_position = 250  # Default
-                strikeout_thickness = 50  # Default
+            # Get underline/strikeout metrics from 'post' or 'OS/2' table
+            underline_position = -100  # Default
+            underline_thickness = 50  # Default
+            strikeout_position = 250  # Default
+            strikeout_thickness = 50  # Default
 
-                if "post" in ttfont:
-                    underline_position = ttfont["post"].underlinePosition
-                    underline_thickness = ttfont["post"].underlineThickness
+            if "post" in ttfont:
+                underline_position = ttfont["post"].underlinePosition
+                underline_thickness = ttfont["post"].underlineThickness
 
-                if "OS/2" in ttfont:
-                    strikeout_position = ttfont["OS/2"].yStrikeoutPosition
-                    strikeout_thickness = ttfont["OS/2"].yStrikeoutSize
+            if "OS/2" in ttfont:
+                strikeout_position = ttfont["OS/2"].yStrikeoutPosition
+                strikeout_thickness = ttfont["OS/2"].yStrikeoutSize
 
-                # Calculate decoration geometry
-                # The decoration should span the entire width of the text
-                # We calculated 'advance_x' as the total width (approx)
-                # But for centered text, the start x is shifted.
+            # Calculate decoration geometry
+            # The decoration should span the entire width of the text
+            # We calculated 'advance_x' as the total width (approx)
+            # But for centered text, the start x is shifted.
 
-                # We need the bounding box of the text to know where to draw the line
-                # Since we have the path data, we could calculate the bbox, but that's expensive.
-                # Instead, we use the layout information we computed.
+            # We need the bounding box of the text to know where to draw
+            # the line. Since we have path data, we could calc the bbox,
+            # but that's expensive. Instead, use computed layout info.
 
-                # For simplicity, we'll draw a rectangle for each line of text
+            # For simplicity, we'll draw a rectangle for each line of text
 
-                for line_chunks in lines:
-                    if not line_chunks:
-                        continue
+            for line_chunks in lines:
+                if not line_chunks:
+                    continue
 
-                    # Calculate line width and start position (similar to how we placed glyphs)
-                    line_width = _measure_line_width(line_chunks)
-                    if "text4" in str(text_elem.get("id")):
-                        dbg(f"DEBUG text4: Measured line_width={line_width}")
-                        for chunk in line_chunks:  # Changed chunk_list to line_chunks
-                            dbg(
-                                f"DEBUG text4 chunk: width={chunk['width']}, text='{chunk['text']}'"
-                            )
-                    line_dir = line_chunks[0].get("direction", "LTR")
+                # Calculate line width and start position (like glyph placement)
+                line_width = _measure_line_width(line_chunks)
+                if "text4" in str(text_elem.get("id")):
+                    dbg(f"DEBUG text4: Measured line_width={line_width}")
+                    for chunk in line_chunks:
+                        dbg(
+                            f"DEBUG text4 chunk: width={chunk['width']}, "
+                            f"text='{chunk['text']}'"
+                        )
+                line_dir = line_chunks[0].get("direction", "LTR")
 
-                    # Re-calculate line anchor offset
-                    if text_anchor == "middle":
-                        line_anchor_offset = -line_width / 2.0
-                    elif text_anchor == "end":
-                        line_anchor_offset = 0.0 if line_dir == "RTL" else -line_width
-                    else:
-                        line_anchor_offset = -line_width if line_dir == "RTL" else 0.0
+                # Re-calculate line anchor offset
+                if text_anchor == "middle":
+                    line_anchor_offset = -line_width / 2.0
+                elif text_anchor == "end":
+                    line_anchor_offset = 0.0 if line_dir == "RTL" else -line_width
+                else:
+                    line_anchor_offset = -line_width if line_dir == "RTL" else 0.0
 
-                    # Line start X (relative to text insertion point 'x')
-                    # Note: 'x' and 'y' are the text element's x,y
-                    # But we are generating paths relative to (0,0) and letting the transform handle x,y?
-                    # NO. In text_to_path_rust_style, we bake x,y into the path data?
-                    # Let's check:
-                    #   pos_x = x + line_anchor_offset + ltr_cursor + (pos.x_offset * seg_scale)
-                    # Yes, we bake x,y.
+                # Line start X (relative to text insertion point 'x')
+                # Note: 'x' and 'y' are the text element's x,y
+                # But we are generating paths relative to (0,0) and letting
+                # the transform handle x,y?
+                # NO. In text_to_path_rust_style, we bake x,y into the path
+                # data. Let's check:
+                #   pos_x = x + line_anchor_offset + ltr_cursor +
+                #           (pos.x_offset * seg_scale)
+                # Yes, we bake x,y.
 
-                    # So the decoration line starts at: x + line_anchor_offset
-                    # And has width: line_width
-                    # Y position: y + (underline_position * scale)  (remember Y is flipped in SVG vs Font?)
-                    # Wait, font coordinates: Y up. SVG: Y down.
-                    # We flip Y when generating path commands: y_scale = -1 * scale
-                    # So:
-                    #   glyph_y = y - (pos.y_offset * seg_scale) - (pos.y_advance * seg_scale) ...
-                    #   Actually, the pen flips it: transform=(scale, 0, 0, -scale, ...)
+                # So the decoration line starts at: x + line_anchor_offset
+                # And has width: line_width
+                # Y position: y + (underline_position * scale)
+                # (remember Y is flipped in SVG vs Font?)
+                # Wait, font coordinates: Y up. SVG: Y down.
+                # We flip Y when generating path commands: y_scale = -1*scale
+                # So:
+                #   glyph_y = y - (pos.y_offset * seg_scale) -
+                #             (pos.y_advance * seg_scale) ...
+                #   Actually, the pen flips it:
+                #   transform=(scale, 0, 0, -scale, ...)
 
-                    # Let's look at how we draw glyphs:
-                    # t = (seg_scale, 0, 0, -seg_scale, pos_x, pos_y)
-                    # So pos_y is the baseline in SVG coordinates.
+                # Let's look at how we draw glyphs:
+                # t = (seg_scale, 0, 0, -seg_scale, pos_x, pos_y)
+                # So pos_y is the baseline in SVG coordinates.
 
-                    # Underline Y (SVG coords) = baseline_y - (underline_position * scale)
-                    # (Minus because underline_position is usually negative in font coords (below baseline),
-                    #  and we want it below baseline in SVG (positive Y relative to baseline? No, SVG Y is down).
-                    #  If font Y is up, underline_pos -100 is below.
-                    #  In SVG Y down, below baseline is +100.
-                    #  So we should SUBTRACT underline_position * scale (since -(-100) = +100).
+                # Underline Y (SVG coords) = baseline_y -
+                #     (underline_position * scale)
+                # (Minus because underline_position is usually negative in
+                #  font coords (below baseline), and we want it below
+                #  baseline in SVG (positive Y relative to baseline? No,
+                #  SVG Y is down). If font Y is up, underline_pos -100 is
+                #  below. In SVG Y down, below baseline is +100.
+                #  So we should SUBTRACT underline_position * scale
+                #  (since -(-100) = +100).
 
-                    # Use the line's baseline y
-                    line_y = line_chunks[0].get("line_y", y)
+                # Use the line's baseline y
+                line_y = line_chunks[0].get("line_y", y)
 
-                    deco_start_x = x + line_anchor_offset
-                    deco_end_x = deco_start_x + line_width
+                deco_start_x = x + line_anchor_offset
+                deco_end_x = deco_start_x + line_width
 
-                    fmt = f"{{:.{precision}f}}"
+                fmt = f"{{:.{precision}f}}"
 
-                    if "underline" in decoration:
-                        u_y = line_y - (underline_position * scale)
-                        u_h = underline_thickness * scale
-                        # Draw rectangle
-                        # Top-left: (start_x, u_y)
-                        # Top-right: (end_x, u_y)
-                        # Bottom-right: (end_x, u_y + u_h)
-                        # Bottom-left: (start_x, u_y + u_h)
+                if "underline" in decoration:
+                    u_y = line_y - (underline_position * scale)
+                    u_h = underline_thickness * scale
+                    # Draw rectangle
+                    # Top-left: (start_x, u_y)
+                    # Top-right: (end_x, u_y)
+                    # Bottom-right: (end_x, u_y + u_h)
+                    # Bottom-left: (start_x, u_y + u_h)
 
-                        rect_d = f"M {fmt.format(deco_start_x)} {fmt.format(u_y)} L {fmt.format(deco_end_x)} {fmt.format(u_y)} L {fmt.format(deco_end_x)} {fmt.format(u_y + u_h)} L {fmt.format(deco_start_x)} {fmt.format(u_y + u_h)} Z"
-                        all_paths.append(rect_d)
+                    rect_d = (
+                        f"M {fmt.format(deco_start_x)} {fmt.format(u_y)} "
+                        f"L {fmt.format(deco_end_x)} {fmt.format(u_y)} "
+                        f"L {fmt.format(deco_end_x)} {fmt.format(u_y + u_h)} "
+                        f"L {fmt.format(deco_start_x)} {fmt.format(u_y + u_h)} Z"
+                    )
+                    all_paths.append(rect_d)
 
-                    if "line-through" in decoration:
-                        s_y = line_y - (strikeout_position * scale)
-                        s_h = strikeout_thickness * scale
-                        rect_d = f"M {fmt.format(deco_start_x)} {fmt.format(s_y)} L {fmt.format(deco_end_x)} {fmt.format(s_y)} L {fmt.format(deco_end_x)} {fmt.format(s_y + s_h)} L {fmt.format(deco_start_x)} {fmt.format(s_y + s_h)} Z"
-                        all_paths.append(rect_d)
+                if "line-through" in decoration:
+                    s_y = line_y - (strikeout_position * scale)
+                    s_h = strikeout_thickness * scale
+                    rect_d = (
+                        f"M {fmt.format(deco_start_x)} {fmt.format(s_y)} "
+                        f"L {fmt.format(deco_end_x)} {fmt.format(s_y)} "
+                        f"L {fmt.format(deco_end_x)} {fmt.format(s_y + s_h)} "
+                        f"L {fmt.format(deco_start_x)} {fmt.format(s_y + s_h)} Z"
+                    )
+                    all_paths.append(rect_d)
 
     path_elem.set("d", " ".join(all_paths))
 
@@ -4049,7 +4332,8 @@ def get_element_bbox(elem):
     return None
 
 
-def get_visual_bboxes(svg_path):
+def _get_visual_bboxes_legacy(svg_path):
+    """Legacy function - uses local CJS script (deprecated, use get_visual_bboxes)."""
     import json
     import subprocess
 
@@ -4197,7 +4481,8 @@ def convert_svg_text_to_paths(
                 preview_text = (content_elem.text or "")[:50]
 
             print(
-                f"  Converting text '{preview_text}' (id={elem_id}, {len(tspans)} tspan(s))..."
+                f"  Converting text '{preview_text}' "
+                f"(id={elem_id}, {len(tspans)} tspan(s))..."
             )
 
             # Setup textPath info if present
@@ -4281,7 +4566,12 @@ def convert_svg_text_to_paths(
 
                 tspan_converted = 0
                 temp_id_counter = 0
-                def _set_path_id(path_elem: ET.Element, preferred_id: str | None) -> None:
+
+                def _set_path_id(
+                    path_elem: ET.Element,
+                    preferred_id: str | None,
+                    elem_id: str = elem_id,
+                ) -> None:
                     nonlocal temp_id_counter
                     if preferred_id:
                         path_elem.set("id", preferred_id)
@@ -4332,9 +4622,12 @@ def convert_svg_text_to_paths(
                         tag = tag.split("}", 1)[1]
                     return tag == "tspan"
 
-                def _style_matches_parent(span_style: str) -> bool:
+                def _style_matches_parent(
+                    span_style: str, parent_style: str = parent_style
+                ) -> bool:
                     if not span_style:
                         return True
+
                     def _style_dict(style_str: str) -> dict[str, str]:
                         out: dict[str, str] = {}
                         for prop in style_str.split(";"):
@@ -4366,10 +4659,11 @@ def convert_svg_text_to_paths(
                         if list(child):
                             can_flatten_dx = False
                             break
-                        if child.get("x") or child.get("y"):
-                            if (child.text or "").strip():
-                                can_flatten_dx = False
-                                break
+                        if (child.get("x") or child.get("y")) and (
+                            child.text or ""
+                        ).strip():
+                            can_flatten_dx = False
+                            break
                         if child.get("style") and not _style_matches_parent(
                             child.get("style", "")
                         ):
@@ -4391,6 +4685,7 @@ def convert_svg_text_to_paths(
                         break
 
                 if can_flatten_dx and has_dx_child:
+
                     def _append_text_with_offsets(
                         text: str | None,
                         dx_vals: list[float],
@@ -4413,14 +4708,20 @@ def convert_svg_text_to_paths(
                         # Detect if children have consistent text-anchor override
                         child_anchors: set[str] = set()
                         _append_text_with_offsets(
-                            line_span.text, [], [], line_text_parts, dx_list_line, dy_list_line
+                            line_span.text,
+                            [],
+                            [],
+                            line_text_parts,
+                            dx_list_line,
+                            dy_list_line,
                         )
                         for child in list(line_span):
                             if not _is_tspan(child):
                                 continue
                             # Collect child anchor for override detection
                             child_anchor_m = re.search(
-                                r"text-anchor:\s*(start|middle|end)", child.get("style", "")
+                                r"text-anchor:\s*(start|middle|end)",
+                                child.get("style", ""),
                             )
                             if child_anchor_m:
                                 child_anchors.add(child_anchor_m.group(1))
@@ -4435,10 +4736,20 @@ def convert_svg_text_to_paths(
                                 else []
                             )
                             _append_text_with_offsets(
-                                child.text, dx_vals, dy_vals, line_text_parts, dx_list_line, dy_list_line
+                                child.text,
+                                dx_vals,
+                                dy_vals,
+                                line_text_parts,
+                                dx_list_line,
+                                dy_list_line,
                             )
                             _append_text_with_offsets(
-                                child.tail, [], [], line_text_parts, dx_list_line, dy_list_line
+                                child.tail,
+                                [],
+                                [],
+                                line_text_parts,
+                                dx_list_line,
+                                dy_list_line,
                             )
 
                         line_text = "".join(line_text_parts)
@@ -4452,7 +4763,12 @@ def convert_svg_text_to_paths(
                         if len(child_anchors) == 1:
                             effective_anchor = next(iter(child_anchors))
                         if DEBUG_ENABLED and elem_id == "text44":
-                            print(f"DEBUG FLATTEN: line_idx={line_idx} child_anchors={child_anchors} parent_anchor={parent_anchor} effective_anchor={effective_anchor}")
+                            print(
+                                f"DEBUG FLATTEN: line_idx={line_idx} "
+                                f"child_anchors={child_anchors} "
+                                f"parent_anchor={parent_anchor} "
+                                f"effective_anchor={effective_anchor}"
+                            )
 
                         temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
                         temp_text.set("x", str(line_x))
@@ -4462,7 +4778,9 @@ def convert_svg_text_to_paths(
                         # instead of the parent's text-anchor. The child anchor wins.
                         # We must update BOTH style and attribute because get_attr()
                         # checks style first (style takes precedence over attribute).
-                        anchor_to_use = effective_anchor if effective_anchor else parent_anchor
+                        anchor_to_use = (
+                            effective_anchor if effective_anchor else parent_anchor
+                        )
                         if parent_style:
                             # Replace text-anchor in style with the effective anchor
                             modified_style = re.sub(
@@ -4480,8 +4798,15 @@ def convert_svg_text_to_paths(
 
                         if DEBUG_ENABLED and elem_id == "text44":
                             # Show non-zero dx values with their positions
-                            nonzero_dx = [(i, v) for i, v in enumerate(dx_list_line) if v != 0.0]
-                            print(f"DEBUG FLATTEN CALL: line_text='{line_text[:30]}...' anchor={effective_anchor} direction={text_elem.get('direction')} dx_len={len(dx_list_line)}")
+                            nonzero_dx = [
+                                (i, v) for i, v in enumerate(dx_list_line) if v != 0.0
+                            ]
+                            print(
+                                f"DEBUG FLATTEN CALL: line_text='{line_text[:30]}...' "
+                                f"anchor={effective_anchor} "
+                                f"direction={text_elem.get('direction')} "
+                                f"dx_len={len(dx_list_line)}"
+                            )
                             print(f"DEBUG FLATTEN DX: nonzero_dx={nonzero_dx[:10]}...")
 
                         result_line = text_to_path_rust_style(
@@ -4508,7 +4833,8 @@ def convert_svg_text_to_paths(
                         parent.insert(idx, group_elem)
                         converted += 1
                         print(
-                            f"    ✓ Converted successfully ({tspan_converted} leaf span(s))"
+                            f"    Converted successfully "
+                            f"({tspan_converted} leaf span(s))"
                         )
                         continue
 
@@ -4538,6 +4864,13 @@ def convert_svg_text_to_paths(
                     cy: float,
                     p_offset: float,
                     inherited_style: str,
+                    text_elem: ET.Element = text_elem,
+                    parent_anchor: str = parent_anchor,
+                    dx_items: list = dx_items,
+                    leaf_items: list = leaf_items,
+                    elem_id: str = elem_id,
+                    path_obj: Any = path_obj,
+                    group_elem: ET.Element = group_elem,
                 ) -> tuple[float, float, float, int]:
                     nonlocal temp_id_counter, tspan_converted
 
@@ -4547,7 +4880,7 @@ def convert_svg_text_to_paths(
                     if "y" in span.attrib:
                         cy = float(span.get("y"))
 
-                    # Collect per-glyph shifts (do not pre-apply; text_to_path_rust_style handles them)
+                    # Collect per-glyph shifts (don't pre-apply; handled later)
                     dx_list_span = (
                         _parse_num_list(span.get("dx", ""))
                         if "dx" in span.attrib
@@ -4574,22 +4907,28 @@ def convert_svg_text_to_paths(
                     if text_content.strip() and not has_child_tspan:
                         anchor_resolved = span_anchor(span, parent_anchor)
                         if (dx_list_span or dy_list_span) and not force_wrap:
-                            # DEFERRED CONVERSION: Don't convert inline - add to dx_items
-                            # to apply parent_shift later (fixes text44 middle anchor issue).
+                            # DEFERRED CONVERSION: Don't convert inline - add to
+                            # dx_items to apply parent_shift later (text44 fix)
                             first_dx = dx_list_span[0] if dx_list_span else 0.0
                             cx += first_dx  # Position tspan at current + first_dx
-                            # Zero out first dx (it was used for tspan position), keep indices aligned
-                            remaining_dx = [0.0] + dx_list_span[1:] if dx_list_span else None
+                            # Zero out first dx (used for tspan position)
+                            remaining_dx = (
+                                [0.0] + dx_list_span[1:] if dx_list_span else None
+                            )
 
                             # Measure width to update cursor for following siblings
-                            temp_measure = ET.Element("{http://www.w3.org/2000/svg}text")
+                            temp_measure = ET.Element(
+                                "{http://www.w3.org/2000/svg}text"
+                            )
                             temp_measure.set("x", "0")
                             temp_measure.set("y", "0")
                             if span_style:
                                 temp_measure.set("style", span_style)
                             temp_measure.set("text-anchor", "start")
                             if "direction" in text_elem.attrib:
-                                temp_measure.set("direction", text_elem.get("direction"))
+                                temp_measure.set(
+                                    "direction", text_elem.get("direction")
+                                )
                             temp_measure.text = text_content
                             measure_result = text_to_path_rust_style(
                                 temp_measure,
@@ -4603,26 +4942,33 @@ def convert_svg_text_to_paths(
                             dx_width = measure_result[1] if measure_result else 0.0
 
                             # Store for deferred conversion with parent_shift
-                            dx_items.append({
-                                "text": text_content,
-                                "x": cx,
-                                "y": cy,
-                                "anchor": anchor_resolved,
-                                "style": span_style,
-                                "dx_list": remaining_dx,
-                                "dy_list": dy_list_span,
-                                "p_offset": p_offset,
-                                "width": dx_width,
-                                "first_dx": first_dx,
-                            })
+                            dx_items.append(
+                                {
+                                    "text": text_content,
+                                    "x": cx,
+                                    "y": cy,
+                                    "anchor": anchor_resolved,
+                                    "style": span_style,
+                                    "dx_list": remaining_dx,
+                                    "dy_list": dy_list_span,
+                                    "p_offset": p_offset,
+                                    "width": dx_width,
+                                    "first_dx": first_dx,
+                                }
+                            )
 
                             # Debug dx/anchor positioning for text44
                             if elem_id == "text44":
-                                print(f"DEBUG DX: tspan '{text_content[:10]}' cx={cx:.2f} first_dx={first_dx:.2f} width={dx_width:.2f} anchor={anchor_resolved}")
+                                print(
+                                    f"DEBUG DX: tspan '{text_content[:10]}' "
+                                    f"cx={cx:.2f} first_dx={first_dx:.2f} "
+                                    f"width={dx_width:.2f} anchor={anchor_resolved}"
+                                )
 
-                            # For text-anchor:end, the x position IS the anchor (end) point.
-                            # After rendering, the current position stays at the anchor,
-                            # NOT at anchor + width. The next sibling's dx is relative to this anchor.
+                            # For text-anchor:end, x position IS the anchor point.
+                            # After rendering, cursor stays at anchor,
+                            # NOT at anchor + width. Next sibling's dx is
+                            # relative to this anchor.
                             # For text-anchor:start/middle, advance normally.
                             if anchor_resolved != "end":
                                 cx += dx_width
@@ -4642,16 +4988,20 @@ def convert_svg_text_to_paths(
                                 }
                             )
                             # CRITICAL: Update cx after adding to leaf_items!
-                            # Without this, subsequent dx tspans use wrong cursor position.
-                            # Measure width to update cursor for following siblings.
-                            temp_measure = ET.Element("{http://www.w3.org/2000/svg}text")
+                            # Without this, subsequent dx tspans use wrong
+                            # cursor position. Measure width for siblings.
+                            temp_measure = ET.Element(
+                                "{http://www.w3.org/2000/svg}text"
+                            )
                             temp_measure.set("x", "0")
                             temp_measure.set("y", "0")
                             if span_style:
                                 temp_measure.set("style", span_style)
                             temp_measure.set("text-anchor", "start")
                             if "direction" in text_elem.attrib:
-                                temp_measure.set("direction", text_elem.get("direction"))
+                                temp_measure.set(
+                                    "direction", text_elem.get("direction")
+                                )
                             temp_measure.text = text_content
                             measure_result = text_to_path_rust_style(
                                 temp_measure,
@@ -4662,9 +5012,9 @@ def convert_svg_text_to_paths(
                             )
                             if measure_result is not None:
                                 _, leaf_width = measure_result
-                                # For text-anchor:end (RTL end-aligned), the cursor stays
-                                # at the anchor point after rendering. The next sibling's
-                                # dx is relative to this anchor, not to the text extent.
+                                # For text-anchor:end (RTL end-aligned), cursor
+                                # stays at anchor after rendering. Next sibling's
+                                # dx is relative to anchor, not text extent.
                                 # For start/middle, advance cursor normally.
                                 if anchor_resolved != "end":
                                     cx += leaf_width
@@ -4718,15 +5068,17 @@ def convert_svg_text_to_paths(
                     "x" in t.attrib or "y" in t.attrib for t in tspans
                 )
 
-                # If inline-size specified, no textPath, and no explicit x/y on tspans, perform wrapping
-                # If inline-size specified, no textPath, and no explicit x/y on tspans, perform wrapping
+                # If inline-size specified, no textPath, and no explicit
+                # x/y on tspans, perform wrapping
                 if elem_id == "text44":
                     print(
-                        f"DEBUG WRAP: inline_size={inline_size} path_obj={path_obj} has_explicit_xy={has_explicit_xy}"
+                        f"DEBUG WRAP: inline_size={inline_size} "
+                        f"path_obj={path_obj} has_explicit_xy={has_explicit_xy}"
                     )
                     for li in leaf_items:
                         print(
-                            f"  LI: x={li['x']} y={li['y']} anchor={li.get('anchor')} text='{li['text']}'"
+                            f"  LI: x={li['x']} y={li['y']} "
+                            f"anchor={li.get('anchor')} text='{li['text']}'"
                         )
 
                 if inline_size and not path_obj and leaf_items:
@@ -4797,7 +5149,7 @@ def convert_svg_text_to_paths(
                             line_x = base_x
                         line_y = base_y + line_index * line_height
                         cursor = 0.0
-                        for li, w, p_elem in line_items:
+                        for _li, w, p_elem in line_items:
                             if p_elem is None:
                                 continue
                             # translate path by line_x + cursor, line_y
@@ -4812,7 +5164,8 @@ def convert_svg_text_to_paths(
                             tspan_converted += 1
                         line_index += 1
                 else:
-                    # No wrapping; convert collected leafs. If not a textPath, apply anchor once per line.
+                    # No wrapping; convert collected leafs.
+                    # If not a textPath, apply anchor once per line.
                     if path_obj:
                         cursor = 0.0
                         for li in leaf_items:
@@ -4851,7 +5204,10 @@ def convert_svg_text_to_paths(
                                 cursor += width
                             else:
                                 if elem_id == "text4":
-                                    dbg("DEBUG text4: result_inner None in line_single branch")
+                                    dbg(
+                                        "DEBUG text4: result_inner None in "
+                                        "line_single branch"
+                                    )
                                 raise RuntimeError(
                                     f"Failed to convert span in element {elem_id}"
                                 )
@@ -4864,7 +5220,7 @@ def convert_svg_text_to_paths(
                             lines[-1].append(li)
 
                         for line_items in lines:
-                            # Base x for the line comes from the first explicit x if present, else parent x
+                            # Base x: first explicit x if present, else parent x
                             explicit_starts = [
                                 li for li in line_items if li["explicit_xy"]
                             ]
@@ -4873,10 +5229,11 @@ def convert_svg_text_to_paths(
                             )
                             line_anchor = parent_anchor
 
-                            # Measure widths with anchor=start to avoid double shifting
-                            # IMPORTANT: Do NOT include transform when measuring width!
-                            # The anchor_shift needs INTRINSIC width, not scaled width.
-                            # The transform will be applied later when generating the final path.
+                            # Measure widths with anchor=start to avoid
+                            # double shifting. IMPORTANT: Do NOT include
+                            # transform when measuring - anchor_shift needs
+                            # INTRINSIC width, not scaled. Transform applied
+                            # later when generating the final path.
                             measured: list[tuple[dict, float]] = []  # (leaf, width)
                             for li in line_items:
                                 temp_measure = ET.Element(
@@ -4884,7 +5241,7 @@ def convert_svg_text_to_paths(
                                 )
                                 temp_measure.set("x", "0")
                                 temp_measure.set("y", "0")
-                                # NOTE: Intentionally NOT setting transform here - we need intrinsic width
+                                # NOTE: NOT setting transform - need intrinsic width
                                 if li["style"]:
                                     temp_measure.set("style", li["style"])
                                 temp_measure.set("text-anchor", "start")
@@ -4906,10 +5263,10 @@ def convert_svg_text_to_paths(
                                 width = res[1] if res is not None else 0.0
                                 measured.append((li, width))
 
-                            # Widths already include dx/spacing from text_to_path_rust_style.
+                            # Widths already include dx/spacing from conversion
                             total_width = sum(w for _, w in measured)
-                            # Keep parent anchor but avoid double shifts on children.
-                            # This change removed a major left drift on some lines (~14%→7% diff overall).
+                            # Keep parent anchor but avoid double shifts on
+                            # children. This fix reduced major left drift.
                             parent_shift = 0.0
                             if line_anchor == "middle":
                                 parent_shift = -total_width / 2.0
@@ -4929,14 +5286,32 @@ def convert_svg_text_to_paths(
                                     elif leaf_anchor == "end":
                                         anchor_shift = -width
 
-                                # If leaf anchor overrides parent, do not reapply parent_shift to avoid double anchoring.
+                                # If leaf anchor overrides parent, skip
+                                # parent_shift to avoid double anchoring.
                                 effective_parent_shift = (
                                     0.0 if leaf_anchor != line_anchor else parent_shift
                                 )
 
-                                if DEBUG_ENABLED and elem_id in ["text39", "text53", "text54"]:
+                                if DEBUG_ENABLED and elem_id in [
+                                    "text39",
+                                    "text53",
+                                    "text54",
+                                ]:
+                                    x_val = (
+                                        line_base_x
+                                        + effective_parent_shift
+                                        + cursor
+                                        + anchor_shift
+                                    )
                                     print(
-                                        f"DEBUG FINAL: id={elem_id} anchor={line_anchor} leaf_anchor={leaf_anchor} width={width} total_width={total_width} parent_shift={parent_shift} eff_shift={effective_parent_shift} base_x={line_base_x} x={line_base_x + effective_parent_shift + cursor + anchor_shift}"
+                                        f"DEBUG FINAL: id={elem_id} "
+                                        f"anchor={line_anchor} "
+                                        f"leaf_anchor={leaf_anchor} "
+                                        f"width={width} "
+                                        f"total_width={total_width} "
+                                        f"parent_shift={parent_shift} "
+                                        f"eff_shift={effective_parent_shift} "
+                                        f"base_x={line_base_x} x={x_val}"
                                     )
 
                                 temp_text.set(
@@ -4983,7 +5358,10 @@ def convert_svg_text_to_paths(
                                     tspan_converted += 1
                                 else:
                                     if elem_id == "text4":
-                                        dbg("DEBUG text4: result_inner None in measured branch")
+                                        dbg(
+                                            "DEBUG text4: result_inner None "
+                                            "in measured branch"
+                                        )
                                     raise RuntimeError(
                                         f"Failed to convert span in element {elem_id}"
                                     )
@@ -4995,7 +5373,7 @@ def convert_svg_text_to_paths(
                     parent.insert(idx, group_elem)
                     converted += 1
                     print(
-                        f"    ✓ Converted successfully ({tspan_converted} leaf span(s))"
+                        f"    Converted successfully ({tspan_converted} leaf span(s))"
                     )
 
                 else:
@@ -5006,7 +5384,8 @@ def convert_svg_text_to_paths(
             else:
                 # Single text element (or textPath without tspans)
 
-                # If textPath, we need to create a temp text element with the content from textPath
+                # If textPath, we need to create a temp text element
+                # with the content from textPath
                 if text_path_elem is not None:
                     temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
                     # Copy attributes from text_elem
@@ -5098,8 +5477,12 @@ def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) ->
     try:
         out_dir = output_path.parent
         out_dir.mkdir(parents=True, exist_ok=True)
-        diff_output = (out_dir / f"{input_path.stem}_vs_{output_path.stem}_diff.png").resolve()
-        html_output = (out_dir / f"{input_path.stem}_vs_{output_path.stem}_comparison.html").resolve()
+        diff_output = (
+            out_dir / f"{input_path.stem}_vs_{output_path.stem}_diff.png"
+        ).resolve()
+        html_output = (
+            out_dir / f"{input_path.stem}_vs_{output_path.stem}_comparison.html"
+        ).resolve()
         project_root = Path(__file__).parent.parent
         try:
             rel_input = input_path.resolve().relative_to(project_root)
@@ -5203,22 +5586,31 @@ def get_visual_bboxes(svg_path: Path, elem_ids: list = None) -> dict:
         return {}
 
 
-def measure_bbox_with_font(svg_path: Path, target_id: str, font_family: str | None, weight: int | None = None) -> tuple[float, float] | None:
+def measure_bbox_with_font(
+    svg_path: Path,
+    target_id: str,
+    font_family: str | None,
+    weight: int | None = None,
+) -> tuple[float, float] | None:
     """Render bbox for a given element, optionally overriding its font family/weight."""
     if not target_id:
         return None
     tmp_path: Path | None = None
     try:
-        # Write temp SVG alongside the source file so sbb-getbbox security checks allow it
+        # Write temp SVG alongside source file for sbb-getbbox security
         tmp_dir = svg_path.parent if svg_path else None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".svg", dir=tmp_dir) as tmp:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=".svg", dir=tmp_dir
+        ) as tmp:
             tmp_path = Path(tmp.name)
         tree = ET.parse(svg_path)
         root = tree.getroot()
         if font_family or weight:
             for elem in root.iter():
                 if elem.get("id") == target_id:
-                    _set_font_family(elem, font_family or elem.get("font-family", ""), weight)
+                    _set_font_family(
+                        elem, font_family or elem.get("font-family", ""), weight
+                    )
                     break
         tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
 
@@ -5256,18 +5648,33 @@ def score_candidates_by_bbox(
     """
     if not candidates or not sample_chars:
         return None
-    samples = list(dict.fromkeys(sample_chars))[: max(1, min(sample_size, len(sample_chars)))]
+    samples = list(dict.fromkeys(sample_chars))[
+        : max(1, min(sample_size, len(sample_chars)))
+    ]
     sample_text = "".join(samples)
 
     tmp_svg: Path | None = None
     try:
         tmp_dir = svg_path.parent if svg_path else None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".svg", dir=tmp_dir) as tmp:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=".svg", dir=tmp_dir
+        ) as tmp:
             tmp_svg = Path(tmp.name)
+            y_pos = font_size * 2
+            style_parts = [
+                f"font-family:'{base_family}'",
+                f"font-size:{font_size}px",
+                f"font-weight:{font_weight}",
+                f"font-style:{font_style}",
+                f"font-stretch:{font_stretch}",
+                "fill:#000",
+            ]
+            style_str = ";".join(style_parts)
+            svg_ns = "http://www.w3.org/2000/svg"
             content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="4000" viewBox="0 0 4000 4000">
-  <text id="sample_text" x="50" y="{font_size*2:.2f}"
-        style="font-family:'{base_family}';font-size:{font_size}px;font-weight:{font_weight};font-style:{font_style};font-stretch:{font_stretch};fill:#000;">
+<svg xmlns="{svg_ns}" width="4000" height="4000" viewBox="0 0 4000 4000">
+  <text id="sample_text" x="50" y="{y_pos:.2f}"
+        style="{style_str};">
     {sample_text}
   </text>
 </svg>
@@ -5280,7 +5687,9 @@ def score_candidates_by_bbox(
         target_w, target_h = target_bbox
         best: tuple[float, str] | None = None
         for fam in candidates:
-            dims = measure_bbox_with_font(tmp_svg, "sample_text", fam, weight=font_weight)
+            dims = measure_bbox_with_font(
+                tmp_svg, "sample_text", fam, weight=font_weight
+            )
             if not dims:
                 continue
             w, h = dims
@@ -5302,7 +5711,10 @@ def choose_fallback_by_bbox(
     weights: list[int] | None = None,
     base_weight: int | None = None,
 ) -> tuple[str, int | None] | None:
-    """Pick the fallback whose bbox best matches the target bbox. Returns (family, weight)."""
+    """Pick the fallback whose bbox best matches target bbox.
+
+    Returns (family, weight).
+    """
     if not candidates:
         return None
     if target_bbox is None:
@@ -5359,11 +5771,15 @@ def detect_chrome_font(
             "--candidates",
             ",".join(candidates),
         ]
-        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            cmd, cwd=project_root, capture_output=True, text=True, timeout=60
+        )
         if result.returncode != 0:
             return None
         data = json.loads(result.stdout)
-        matches = [c["family"] for c in data.get("candidates", []) if c.get("hashMatch")]
+        matches = [
+            c["family"] for c in data.get("candidates", []) if c.get("hashMatch")
+        ]
         if matches:
             return matches[0]
     except Exception:
@@ -5371,7 +5787,9 @@ def detect_chrome_font(
     return None
 
 
-def fetch_fontconfig_candidates(family: str, lang: str | None = None, limit: int = 8) -> list[str]:
+def fetch_fontconfig_candidates(
+    family: str, lang: str | None = None, limit: int = 8
+) -> list[str]:
     """Get candidate families from fontconfig (fc-match --sort)."""
     patterns = []
     if family:
@@ -5406,7 +5824,7 @@ def fetch_fontconfig_candidates(family: str, lang: str | None = None, limit: int
 
 
 def fetch_charset_candidates(codepoints: set[int], limit: int = 8) -> list[str]:
-    """Use fc-match charset queries to quickly gather fonts that claim coverage for sample codepoints."""
+    """Use fc-match charset queries to gather fonts claiming coverage."""
     from shutil import which
 
     if not which("fc-match") or not codepoints:
@@ -5443,7 +5861,10 @@ def fetch_charset_candidates(codepoints: set[int], limit: int = 8) -> list[str]:
 
 
 def expand_weights(base: int) -> list[int]:
-    """Return a tiny set of weights (requested + a couple of common fallbacks) to keep memory low."""
+    """Return a tiny set of weights to keep memory low.
+
+    Includes the requested weight plus a couple of common fallbacks.
+    """
     b = int(base)
     weights = {max(100, min(900, b)), 400, 500}
     return sorted(weights)
@@ -5540,7 +5961,10 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="t2p_convert",
-        description="Convert all SVG <text>/<tspan>/<textPath> to <path> outlines using HarfBuzz shaping.",
+        description=(
+            "Convert all SVG <text>/<tspan>/<textPath> to <path> "
+            "outlines using HarfBuzz shaping."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n"
         "  t2p_convert samples/test_text_to_path.svg\n"
@@ -5556,7 +5980,10 @@ def main():
         "--precision",
         type=int,
         default=28,
-        help="Decimal places for generated path coordinates (use 6 to roughly match Inkscape path size).",
+        help=(
+            "Decimal places for generated path coordinates "
+            "(use 6 to roughly match Inkscape path size)."
+        ),
     )
     parser.add_argument(
         "--no-html",

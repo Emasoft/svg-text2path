@@ -49,7 +49,7 @@ def main():
     p.add_argument(
         "--samples-dir",
         default="samples/reference_objects",
-        help="Directory containing text*.svg samples (default: samples/reference_objects)",
+        help="Directory with text*.svg samples (default: samples/reference_objects)",
     )
     p.add_argument(
         "--out-dir",
@@ -97,7 +97,7 @@ def main():
         help="Comparer timeout in seconds (default: 300).",
     )
     args = p.parse_args()
-    # Back-compat / convenience: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
+    # Back-compat: accept --resolution like "4x" (meaning scale=4, resolution=viewbox)
     if isinstance(args.resolution, str) and args.resolution.lower().endswith("x"):
         try:
             parsed_scale = float(args.resolution[:-1])
@@ -108,7 +108,8 @@ def main():
             pass
     if args.resolution not in _SBB_RESOLUTION_MODES:
         raise SystemExit(
-            f"Invalid --resolution '{args.resolution}'. Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
+            f"Invalid --resolution '{args.resolution}'. "
+            f"Expected one of: {', '.join(sorted(_SBB_RESOLUTION_MODES))}"
         )
 
     root = repo_root()
@@ -123,7 +124,8 @@ def main():
     svgs = [
         p
         for p in sorted(samples_dir.glob("text*.svg"))
-        if p.name not in set(args.skip) and (args.include_paths or "-paths" not in p.name)
+        if p.name not in set(args.skip)
+        and (args.include_paths or "-paths" not in p.name)
     ]
     if not svgs:
         print("No text*.svg files found; nothing to do.")

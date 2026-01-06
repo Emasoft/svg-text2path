@@ -2,15 +2,19 @@
 """
 Frame Comparer (t2p_compare)
 ----------------------------
-Render two SVGs with Inkscape, diff their PNGs pixel-perfectly, and (optionally) compare against an Inkscape text-to-path reference.
+Render two SVGs with Inkscape, diff their PNGs pixel-perfectly,
+and (optionally) compare against an Inkscape text-to-path reference.
 
 Usage:
-  t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] [--output-dir DIR] [--tolerance 0.2] [--pixel-tolerance 0.01]
+  t2p_compare ref.svg ours.svg [--inkscape-svg ref_paths.svg] \
+    [--output-dir DIR] [--tolerance 0.2] [--pixel-tolerance 0.01]
 
 Examples:
   t2p_compare samples/test_text_to_path_advanced.svg /tmp/out.svg
-  t2p_compare samples/test_text_to_path_advanced.svg /tmp/out.svg --inkscape-svg samples/test_text_to_path_advanced_inkscape_paths.svg
-  t2p_compare a.svg b.svg -o ./diffs --tolerance 0.1 --pixel-tolerance 0.005 --keep-pngs
+  t2p_compare samples/test_text_to_path_advanced.svg /tmp/out.svg \
+    --inkscape-svg samples/test_text_to_path_advanced_inkscape_paths.svg
+  t2p_compare a.svg b.svg -o ./diffs --tolerance 0.1 \
+    --pixel-tolerance 0.005 --keep-pngs
 """
 
 import argparse
@@ -33,7 +37,7 @@ def pixel_tol_to_threshold(pixel_tol: float) -> int:
 
 def run_sbb_comparer(
     svg1: Path, svg2: Path, output_dir: Path, pixel_tol: float, no_html: bool
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Run sbb-comparer.cjs and return parsed JSON result."""
     sbb_comparer_script = Path(__file__).parent.parent / "SVG-BBOX" / "sbb-comparer.cjs"
     if not sbb_comparer_script.exists():
@@ -80,7 +84,11 @@ def run_sbb_comparer(
         return payload
 
     if payload:
-        diff_pct = payload.get("diffPercentage") or payload.get("difference") or payload.get("diff_percentage")
+        diff_pct = (
+            payload.get("diffPercentage")
+            or payload.get("difference")
+            or payload.get("diff_percentage")
+        )
         if diff_pct is not None:
             print(f"✓ Diff: {float(diff_pct):.4f}% (threshold={threshold})")
 
@@ -95,25 +103,27 @@ class SVGRenderer:
     def _parse_svg_dimensions(svg_path: Path) -> tuple[int, int] | None:
         try:
             root = ET.parse(svg_path).getroot()
+
             def _num(val: str) -> float | None:
                 if val is None:
                     return None
                 m = None
                 try:
-                    m = float(''.join([c for c in val if (c.isdigit() or c in '.+-')]))
+                    m = float("".join([c for c in val if (c.isdigit() or c in ".+-")]))
                 except Exception:
                     return None
                 return m
-            w_attr = root.get('width')
-            h_attr = root.get('height')
-            vb = root.get('viewBox')
+
+            w_attr = root.get("width")
+            h_attr = root.get("height")
+            vb = root.get("viewBox")
             if w_attr and h_attr:
                 w = _num(w_attr)
                 h = _num(h_attr)
                 if w and h:
                     return int(round(w)), int(round(h))
             if vb:
-                parts = vb.replace(',', ' ').split()
+                parts = vb.replace(",", " ").split()
                 if len(parts) == 4:
                     try:
                         return int(float(parts[2])), int(float(parts[3]))
@@ -127,29 +137,42 @@ class SVGRenderer:
     def render_svg_to_png(svg_path: Path, png_path: Path, dpi: int = 96) -> bool:
         """Render SVG to PNG with Chrome via puppeteer script render_svg_chrome.js.
 
-        Notes: dpi is ignored; Chrome renders at CSS pixel units matching SVG width/height.
+        Notes: dpi is ignored; Chrome renders at CSS pixel units
+        matching SVG width/height.
         """
         dim = SVGRenderer._parse_svg_dimensions(svg_path)
         if not dim:
-            print(f"❌ Error: cannot determine SVG dimensions for {svg_path}", file=sys.stderr)
+            msg = f"Error: cannot determine SVG dimensions for {svg_path}"
+            print(f"X {msg}", file=sys.stderr)
             return False
         width, height = dim
         try:
             script = Path(__file__).parent / "render_svg_chrome.js"
-            cmd = ["node", str(script), str(svg_path), str(png_path), str(width), str(height)]
+            cmd = [
+                "node",
+                str(script),
+                str(svg_path),
+                str(png_path),
+                str(width),
+                str(height),
+            ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
             if result.returncode != 0:
-                print(f"⚠️  Chrome render failed: {result.stderr}", file=sys.stderr)
+                print(f"! Chrome render failed: {result.stderr}", file=sys.stderr)
                 return False
             return png_path.exists()
         except FileNotFoundError:
-            print("❌ Error: node or Chrome (puppeteer) not found. Install Node.js and run `npm install puppeteer`.", file=sys.stderr)
+            msg = (
+                "Error: node or Chrome (puppeteer) not found. "
+                "Install Node.js and run `npm install puppeteer`."
+            )
+            print(f"X {msg}", file=sys.stderr)
             return False
         except subprocess.TimeoutExpired:
-            print(f"❌ Error: Rendering timeout for {svg_path}", file=sys.stderr)
+            print(f"X Error: Rendering timeout for {svg_path}", file=sys.stderr)
             return False
         except Exception as e:
-            print(f"❌ Error rendering {svg_path} with Chrome: {e}", file=sys.stderr)
+            print(f"X Error rendering {svg_path} with Chrome: {e}", file=sys.stderr)
             return False
 
 
@@ -183,9 +206,10 @@ class ImageComparator:
             img1 = Image.open(img1_path).convert("RGBA")
             img2 = Image.open(img2_path).convert("RGBA")
         except FileNotFoundError as e:
-            return False, {"images_exist": False, "error": f"File not found: {str(e)}"}
+            return False, {"images_exist": False, "error": f"File not found: {e!s}"}
         except Exception as e:
-            return False, {"images_exist": False, "error": f"Error loading images: {str(e)}"}
+            err = f"Error loading images: {e!s}"
+            return False, {"images_exist": False, "error": err}
 
         # Check dimensions match
         if img1.size != img2.size:
@@ -212,8 +236,10 @@ class ImageComparator:
         diff_pixels = int(np.sum(diff_mask))
         total_pixels = arr1.shape[0] * arr1.shape[1]
 
-        # Calculate difference percentage
-        diff_percentage = ((diff_pixels / total_pixels) * 100) if total_pixels > 0 else 0.0
+        # Calculate difference percentage (expanded to avoid long line)
+        diff_percentage = (  # noqa: SIM108
+            (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0.0
+        )
 
         # Find first difference location
         first_diff_location = None
@@ -276,8 +302,8 @@ def total_path_chars(svg_path: Path) -> int:
     total = 0
     for el in root.iter():
         tag = el.tag
-        if '}' in tag:
-            tag = tag.split('}')[1]
+        if "}" in tag:
+            tag = tag.split("}")[1]
         if tag != "path":
             continue
         dval = el.get("d")
@@ -285,7 +311,13 @@ def total_path_chars(svg_path: Path) -> int:
             total += len(dval)
     return total
 
-def generate_diff_image(img1_path: Path, img2_path: Path, output_path: Path, pixel_tolerance: float = 1 / 256) -> None:
+
+def generate_diff_image(
+    img1_path: Path,
+    img2_path: Path,
+    output_path: Path,
+    pixel_tolerance: float = 1 / 256,
+) -> None:
     """Generate visual diff image highlighting differences in red."""
     try:
         img1 = Image.open(img1_path).convert("RGBA")
@@ -310,7 +342,12 @@ def generate_diff_image(img1_path: Path, img2_path: Path, output_path: Path, pix
     except Exception as e:
         print(f"⚠️  Error generating diff image: {str(e)}", file=sys.stderr)
 
-def generate_grayscale_diff_map(img1_path: Path, img2_path: Path, output_path: Path) -> None:
+
+def generate_grayscale_diff_map(
+    img1_path: Path,
+    img2_path: Path,
+    output_path: Path,
+) -> None:
     """Generate grayscale diff map showing magnitude of differences."""
     try:
         img1 = Image.open(img1_path).convert("RGBA")
@@ -323,7 +360,9 @@ def generate_grayscale_diff_map(img1_path: Path, img2_path: Path, output_path: P
         arr2 = np.array(img2, dtype=np.float64)
 
         diff = np.sqrt(np.sum((arr1 - arr2) ** 2, axis=2))
-        diff_norm = np.clip((diff / diff.max()) * 255 if diff.max() > 0 else diff, 0, 255).astype(np.uint8)
+        max_diff = diff.max()
+        scaled = (diff / max_diff) * 255 if max_diff > 0 else diff
+        diff_norm = np.clip(scaled, 0, 255).astype(np.uint8)
 
         Image.fromarray(diff_norm).save(output_path)
         print(f"✓ Saved grayscale diff map: {output_path}")
@@ -346,10 +385,14 @@ def format_comparison_result(diff_info: dict[str, Any]) -> str:
     tolerance = diff_info["tolerance"]
     is_identical = diff_info["within_tolerance"]
 
-    status = "✓" if is_identical else "✗"
-    result = f"{status} Comparison: {diff_percentage:.4f}% different ({diff_pixels:,} / {total_pixels:,} pixels)\n"
+    status = "PASS" if is_identical else "FAIL"
+    diff_str = f"{diff_percentage:.4f}% different"
+    pixel_str = f"{diff_pixels:,} / {total_pixels:,} pixels"
+    result = f"{status} Comparison: {diff_str} ({pixel_str})\n"
     result += f"  Tolerance: {tolerance}%\n"
-    result += f"  Pixel tolerance: {diff_info['pixel_tolerance']} ({diff_info['pixel_tolerance_rgb']:.1f} RGB units)\n"
+    pix_tol = diff_info["pixel_tolerance"]
+    pix_rgb = diff_info["pixel_tolerance_rgb"]
+    result += f"  Pixel tolerance: {pix_tol} ({pix_rgb:.1f} RGB units)\n"
 
     if diff_pixels > 0:
         first_diff = diff_info["first_diff_location"]
@@ -363,7 +406,7 @@ def format_comparison_result(diff_info: dict[str, Any]) -> str:
     return result
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare two SVG files visually with pixel-perfect diff output",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -397,7 +440,9 @@ def main():
         default=Path("history"),
         help="Directory to store HTML comparison history (default: ./history)",
     )
-    parser.add_argument("--precision", type=int, default=None, help="Ignored (compatibility).")
+    parser.add_argument(
+        "--precision", type=int, default=None, help="Ignored (compatibility)."
+    )
     parser.add_argument(
         "--no-html",
         action="store_true",

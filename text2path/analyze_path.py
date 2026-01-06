@@ -4,22 +4,26 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
-def get_bbox(svg_path):
+def get_bbox(svg_path: Path) -> None:
     tree = ET.parse(svg_path)
     root = tree.getroot()
-    ns = {'svg': 'http://www.w3.org/2000/svg'}
+    ns = {"svg": "http://www.w3.org/2000/svg"}
 
-    path = root.find('.//svg:path', ns)
+    path = root.find(".//svg:path", ns)
     if path is None:
         print("No path found")
         return
 
-    d = path.get('d')
+    d = path.get("d")
+    if d is None:
+        print("Path element has no 'd' attribute")
+        return
 
     # Simple regex to extract all numbers
-    coords = [float(x) for x in re.findall(r'[-+]?\d*\.\d+|[-+]?\d+', d)]
+    coords = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", d)]
 
-    # Group into pairs (this is a rough approximation, assuming all commands use x,y pairs)
+    # Group into pairs (this is a rough approximation,
+    # assuming all commands use x,y pairs)
     # It works for M, L, but Q uses control points too.
     # However, we just want the min/max of ALL coordinates to get a rough bbox.
 
@@ -36,15 +40,20 @@ def get_bbox(svg_path):
     # First point
     print(f"Start Point: ({xs[0]:.2f}, {ys[0]:.2f})")
 
-def main():
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog="t2p_analyze_path",
-        description="Compute a rough bounding box for the first <path> in an SVG (debug helper).",
+        description=(
+            "Compute a rough bounding box for the first <path> in an SVG "
+            "(debug helper)."
+        ),
         epilog="Example: t2p_analyze_path samples/test_text_to_path_advanced.svg",
     )
     parser.add_argument("svg", type=Path, help="SVG file containing a <path>")
     args = parser.parse_args()
     get_bbox(args.svg)
+
 
 if __name__ == "__main__":
     main()

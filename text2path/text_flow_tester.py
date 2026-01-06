@@ -6,25 +6,27 @@ Extract a single <text> element from an SVG (by id) into a minimal SVG,
 run our text2path converter, render both with Inkscape, and report pixel diff.
 
 Usage:
-  python src/text_flow_tester.py --svg samples/test_text_to_path_advanced.svg --id text44 --work /tmp/flowtest
+  python src/text_flow_tester.py --svg samples/test_text_to_path_advanced.svg \\
+         --id text44 --work /tmp/flowtest
 """
 
 import argparse
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 from text2path.frame_comparer import ImageComparator, SVGRenderer
 
 
 def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Path]:
     """
-    Extract a single <text> element (by id) along with defs/viewBox/width/height into a new SVG.
+    Extract a single <text> element (by id) along with defs/viewBox/width/height.
+
     Returns (original_svg, converted_svg_placeholder_path).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    import xml.etree.ElementTree as ET
-
     tree = ET.parse(svg_path)
     root = tree.getroot()
 
@@ -36,16 +38,18 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
     new_root = ET.Element(root.tag, root.attrib)
     # copy defs (gradients, paths) that text may reference
     for child in root:
-        tag = child.tag.split('}')[-1]
+        tag = child.tag.split("}")[-1]
         if tag == "defs":
             new_root.append(child)
+
     # copy referenced paths for textPath
-    def collect_paths(el, dst_root):
+    def collect_paths(el: ET.Element, dst_root: ET.Element) -> None:
         for ch in el:
-            tag = ch.tag.split('}')[-1]
+            tag = ch.tag.split("}")[-1]
             if tag == "path" and ch.get("id"):
                 dst_root.append(ch)
             collect_paths(ch, dst_root)
+
     collect_paths(root, new_root)
 
     new_root.append(text_el)
@@ -56,12 +60,20 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
     return extracted, converted
 
 
-def run_converter(single_svg: Path, converted_svg: Path, precision: int = 6):
-    cmds = ["t2p_convert", str(single_svg), str(converted_svg), "--precision", str(precision)]
+def run_converter(single_svg: Path, converted_svg: Path, precision: int = 6) -> None:
+    cmds = [
+        "t2p_convert",
+        str(single_svg),
+        str(converted_svg),
+        "--precision",
+        str(precision),
+    ]
     subprocess.run(cmds, check=True)
 
 
-def compare(ref_svg: Path, cmp_svg: Path, workdir: Path, dpi: int = 96):
+def compare(
+    ref_svg: Path, cmp_svg: Path, workdir: Path, dpi: int = 96
+) -> tuple[bool, dict[str, Any]]:
     renderer = SVGRenderer()
     comparator = ImageComparator()
     png_ref = workdir / f"{ref_svg.stem}.png"
@@ -76,17 +88,27 @@ def compare(ref_svg: Path, cmp_svg: Path, workdir: Path, dpi: int = 96):
     return ok, info
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(
         prog="t2p_text_flow_test",
-        description="Extract a text element by id, convert with t2p_convert, render both, and diff PNGs.",
-        epilog="Example: t2p_text_flow_test --svg samples/test_text_to_path_advanced.svg --id text44 --work /tmp/flow",
+        description=(
+            "Extract a text element by id, convert with t2p_convert, "
+            "render both, and diff PNGs."
+        ),
+        epilog=(
+            "Example: t2p_text_flow_test --svg samples/test.svg "
+            "--id text44 --work /tmp/flow"
+        ),
     )
     ap.add_argument("--svg", required=True, type=Path, help="Source SVG file")
-    ap.add_argument("--id", required=True, help="text element id to extract and test")
-    ap.add_argument("--work", type=Path, default=None, help="Work directory (default: mktemp)")
-    ap.add_argument("--precision", type=int, default=6, help="Precision for t2p_convert")
-    ap.add_argument("--annotate-only", action="store_true", help="Only extract element; skip convert/compare")
+    ap.add_argument("--id", required=True, help="text element id to extract")
+    ap.add_argument("--work", type=Path, default=None, help="Work directory")
+    ap.add_argument("--precision", type=int, default=6, help="Precision")
+    ap.add_argument(
+        "--annotate-only",
+        action="store_true",
+        help="Only extract element; skip convert/compare",
+    )
     args = ap.parse_args()
 
     workdir = args.work or Path(tempfile.mkdtemp(prefix="flowtest_"))
@@ -102,6 +124,7 @@ def main():
     diff_pct = info.get("diff_percentage", 0.0)
     print(f"Diff for {args.id}: {diff_pct:.4f}% (pixels {info.get('diff_pixels')})")
     print(f"PNGs: {workdir}")
+
 
 if __name__ == "__main__":
     main()
