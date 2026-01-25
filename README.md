@@ -30,7 +30,7 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 
 ## Installation
 
-**Requires Python 3.10-3.12** (Python 3.12 recommended for best compatibility)
+**Requires Python 3.11-3.12** (Python 3.12 recommended for best compatibility)
 
 Three installation methods depending on your use case:
 
@@ -63,7 +63,7 @@ uv add svg-text2path
 uv remove svg-text2path
 ```
 
-Use this when you want to import `svg_text2path` in your code. Make sure your project uses Python 3.10-3.12.
+Use this when you want to import `svg_text2path` in your code. Make sure your project uses Python 3.11-3.12.
 
 ### 3. Direct Install (Virtual Environment)
 

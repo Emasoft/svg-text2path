@@ -5,7 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -404,7 +404,7 @@ def batch_regression(
         registry = repo_root / "tmp" / "regression_history.json"
 
     # Create timestamped run directory
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / timestamp
     conv_dir = run_dir / "converted"
     run_dir.mkdir(parents=True, exist_ok=True)
