@@ -9,14 +9,19 @@ from svg_text2path import __version__
 
 # ANSI logo - embedded to avoid file I/O issues in installed packages
 # fmt: off
-# ruff: noqa: E501
 LOGO = (
-    "  _____________   ____________        ___________              __  __________________         __  .__     \n"
-    " ╱   _____╱╲   ╲ ╱   ╱  _____╱        ╲__    ___╱___ ___  ____╱  │_╲_____  ╲______   ╲_____ _╱  │_│  │__  \n"
-    " ╲_____  ╲  ╲   Y   ╱   ╲  ___   ______ │    │_╱ __ ╲╲  ╲╱  ╱╲   __╲╱  ____╱│     ___╱╲__  ╲╲   __╲  │  ╲ \n"
-    " ╱        ╲  ╲     ╱╲    ╲_╲  ╲ ╱_____╱ │    │╲  ___╱ >    <  │  │ ╱       ╲│    │     ╱ __ ╲│  │ │   Y  ╲\n"
-    "╱_______  ╱   ╲___╱  ╲______  ╱         │____│ ╲___  >__╱╲_ ╲ │__│ ╲_______ ╲____│    (____  ╱__│ │___│  ╱\n"
-    "        ╲╱                  ╲╱                     ╲╱      ╲╱              ╲╱              ╲╱          ╲╱"
+    "                   _____________   ____________                     \n"
+    "                  ╱   _____╱╲   ╲ ╱   ╱  _____╱                     \n"
+    "          ______  ╲_____  ╲  ╲   Y   ╱   ╲  ___   ______            \n"
+    "         ╱_____╱  ╱        ╲  ╲     ╱╲    ╲_╲  ╲ ╱_____╱            \n"
+    "                 ╱_______  ╱   ╲___╱  ╲______  ╱                    \n"
+    "                         ╲╱                  ╲╱                     \n"
+    "___________              __  __________________         __  .__     \n"
+    "╲__    ___╱___ ___  ____╱  │_╲_____  ╲______   ╲_____ _╱  │_│  │__  \n"
+    "  │    │_╱ __ ╲╲  ╲╱  ╱╲   __╲╱  ____╱│     ___╱╲__  ╲╲   __╲  │  ╲ \n"
+    "  │    │╲  ___╱ >    <  │  │ ╱       ╲│    │     ╱ __ ╲│  │ │   Y  ╲\n"
+    "  │____│ ╲___  >__╱╲_ ╲ │__│ ╲_______ ╲____│    (____  ╱__│ │___│  ╱\n"
+    "             ╲╱      ╲╱              ╲╱              ╲╱          ╲╱ "
 )
 # fmt: on
 
@@ -40,9 +45,9 @@ def print_banner(console: Console | None = None, force: bool = False) -> None:
     # Print logo in cyan
     console.print(Text(LOGO, style="cyan"))
 
-    # Print version and GitHub link
+    # Print version and GitHub link (centered for 68-char logo)
     console.print(
-        f"                              [bold]v{__version__}[/bold]  •  [link={GITHUB_URL}]{GITHUB_URL}[/link]",
+        f"         [bold]v{__version__}[/bold]  •  [link={GITHUB_URL}]{GITHUB_URL}[/link]",
         highlight=False,
     )
     console.print()  # Empty line after banner
