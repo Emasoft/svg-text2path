@@ -22,12 +22,10 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from main import (  # type: ignore
+from text2path.main import (
     FontCache,
     apply_visual_correction,
     convert_svg_text_to_paths,

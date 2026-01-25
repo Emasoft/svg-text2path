@@ -10,7 +10,7 @@ import contextlib
 from dataclasses import dataclass
 from typing import Any
 
-import uharfbuzz as hb
+import uharfbuzz as hb  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -53,9 +53,9 @@ def create_hb_font(
     Returns:
         HarfBuzz Font object
     """
-    blob = hb.Blob(font_blob)
-    face = hb.Face(blob, font_index)
-    font = hb.Font(face)
+    blob = hb.Blob(font_blob)  # type: ignore[attr-defined]
+    face = hb.Face(blob, font_index)  # type: ignore[attr-defined]
+    font = hb.Font(face)  # type: ignore[attr-defined]
 
     # Scale is in 26.6 fixed-point format (multiply by 64)
     scale = int(font_size * 64)
@@ -98,7 +98,7 @@ def shape_text(
     hb_font = create_hb_font(font_blob, font_index, font_size, variations)
 
     # Create buffer
-    buf = hb.Buffer()
+    buf = hb.Buffer()  # type: ignore[attr-defined]
     buf.add_str(text)
 
     # Set direction (uharfbuzz uses string values for direction)
@@ -124,7 +124,7 @@ def shape_text(
             hb_features[feature] = enabled
 
     # Shape the text
-    hb.shape(hb_font, buf, hb_features)
+    hb.shape(hb_font, buf, hb_features)  # type: ignore[attr-defined]
 
     # Extract results
     infos = buf.glyph_infos
@@ -178,7 +178,7 @@ def shape_run(
     Returns:
         List of shaped glyphs
     """
-    buf = hb.Buffer()
+    buf = hb.Buffer()  # type: ignore[attr-defined]
     buf.add_str(text)
     # uharfbuzz uses string values for direction
     buf.direction = "rtl" if direction == "rtl" else "ltr"
@@ -196,7 +196,7 @@ def shape_run(
         for feature, enabled in features.items():
             hb_features[feature] = enabled
 
-    hb.shape(hb_font, buf, hb_features)
+    hb.shape(hb_font, buf, hb_features)  # type: ignore[attr-defined]
 
     infos = buf.glyph_infos
     positions = buf.glyph_positions

@@ -263,7 +263,6 @@ def convert_lxml_document(
             # - precision=6: "M 10.123456 20.654321" (very accurate, larger files)
             # - precision=8: "M 10.12345678 20.65432100" (overkill for most uses)
             # Most SVG applications use 4-6 decimal places.
-
             preserve_styles=preserve_styles,
         )
 
@@ -344,16 +343,12 @@ def convert_lxml_document(
     result = ConversionResult(
         success=(remaining_text == 0),
         # Success means NO text elements remain (all were converted to paths)
-
         input_format="lxml_document",
         # Record where the input came from for debugging/logging
-
         output=None,
         # We return the document directly, not a file path, so output is None
-
         text_count=text_count,
         # How many text elements were in the original SVG
-
         path_count=path_count,
         # How many path elements exist after conversion
         # Note: This includes both newly created paths AND any paths that
@@ -649,9 +644,7 @@ def test_font_cache_reuse(verbose: bool = True) -> bool:
     results = []
     for i in range(3):
         doc = create_sample_svg(num_texts=2, text_content=f"Test {i + 1}")
-        _converted_doc, result = convert_lxml_document(
-            doc, converter=converter
-        )
+        _converted_doc, result = convert_lxml_document(doc, converter=converter)
         results.append(result.path_count > 0)
 
     success = all(results)
@@ -941,7 +934,6 @@ def run_demo(input_path: Path | None, output_path: Path | None) -> int:
         # - xml_declaration: Whether to include <?xml version="1.0"?> at top
         # - pretty_print: Whether to add indentation and newlines for
         #   readability (True = human-readable, False = compact/minified)
-
         encoding="utf-8",
         xml_declaration=True,
         pretty_print=True,
@@ -993,8 +985,14 @@ Examples:
     parser.add_argument(
         "--test",
         choices=[
-            "all", "basic", "element", "precision",
-            "cache", "empty", "error", "stress"
+            "all",
+            "basic",
+            "element",
+            "precision",
+            "cache",
+            "empty",
+            "error",
+            "stress",
         ],
         help="Run specific test or all tests",
     )
@@ -1016,7 +1014,8 @@ Examples:
         help="Number of text elements for stress test (default: 50)",
     )
     parser.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="Reduce output verbosity",
     )

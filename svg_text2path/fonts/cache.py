@@ -262,7 +262,7 @@ class FontCache:
             weight = 400
             try:
                 if "OS/2" in tt:
-                    weight = int(tt["OS/2"].usWeightClass)
+                    weight = int(tt["OS/2"].usWeightClass)  # type: ignore[reportAttributeAccessIssue]
             except Exception:
                 pass
             flags: dict[str, bool] = {}

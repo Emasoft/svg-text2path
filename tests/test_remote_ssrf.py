@@ -134,7 +134,6 @@ class TestSSRFProtection:
             # Check the error message or details contain relevant info
             error_str = str(exc_info.value)
             is_blocked = (
-                "internal-server.local" in error_str
-                or "private" in error_str.lower()
+                "internal-server.local" in error_str or "private" in error_str.lower()
             )
             assert is_blocked

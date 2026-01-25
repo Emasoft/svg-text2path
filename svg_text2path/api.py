@@ -428,7 +428,7 @@ class Text2PathConverter:
         hb_font = self._hb_font_cache[cache_key]
 
         # Get font metrics for scaling
-        units_per_em = tt_font["head"].unitsPerEm
+        units_per_em = tt_font["head"].unitsPerEm  # type: ignore[reportAttributeAccessIssue]
         scale = font_size / units_per_em
 
         # Skip BiDi processing for pure ASCII text (performance optimization)

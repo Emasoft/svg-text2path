@@ -55,7 +55,7 @@ def apply_bidi_algorithm(text: str, base_direction: str = "auto") -> str:
     else:
         base_dir = "L"
 
-    result: str = get_display(text, base_dir=base_dir)
+    result: str = get_display(text, base_dir=base_dir)  # type: ignore[reportAssignmentType]
     return result
 
 

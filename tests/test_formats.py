@@ -356,7 +356,9 @@ class TestDetectFormat:
         # detect_format works correctly for HTML FILE PATHS (by extension)
         # For string content with <svg>, it returns SVG_STRING due to check ordering
         html_file = tmp_path / "page.html"
-        html_file.write_text('<html><body><svg xmlns="http://www.w3.org/2000/svg"><rect/></svg></body></html>')
+        html_file.write_text(
+            '<html><body><svg xmlns="http://www.w3.org/2000/svg"><rect/></svg></body></html>'
+        )
 
         result = detect_format(html_file)
 
@@ -510,7 +512,9 @@ class TestJSONHandler:
         handler = JSONHandler()
 
         # Simple JSON object with SVG
-        json_with_svg = '{"icon": "<svg xmlns=\\"http://www.w3.org/2000/svg\\"><rect/></svg>"}'
+        json_with_svg = (
+            '{"icon": "<svg xmlns=\\"http://www.w3.org/2000/svg\\"><rect/></svg>"}'
+        )
         assert handler.can_handle(json_with_svg) is True
 
         # JSON array with SVG
@@ -570,7 +574,9 @@ class TestCSVHandler:
         assert handler.can_handle(csv_with_svg) is True
 
         # Tab-separated with SVG
-        tsv_with_svg = 'id\tsvg\n1\t<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        tsv_with_svg = (
+            'id\tsvg\n1\t<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        )
         assert handler.can_handle(tsv_with_svg) is True
 
         # CSV without SVG
@@ -587,15 +593,13 @@ class TestCSSHandlerAdditional:
 
         # background-image with data URI
         css_bg = (
-            '.icon { background-image: '
-            'url("data:image/svg+xml,%3Csvg%3E%3C/svg%3E"); }'
+            '.icon { background-image: url("data:image/svg+xml,%3Csvg%3E%3C/svg%3E"); }'
         )
         assert handler.can_handle(css_bg) is True
 
         # mask property with data URI
         css_mask = (
-            '.masked { mask: '
-            'url("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="); }'
+            '.masked { mask: url("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="); }'
         )
         assert handler.can_handle(css_mask) is True
 

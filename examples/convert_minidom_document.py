@@ -118,7 +118,6 @@ def convert_minidom_document(
     # XML/SVG tree. It's like the file itself. An "Element" is a single node
     # like <text> or <path>. The Document owns all Elements.
     # Think: Document = entire book, Element = a single page
-
     precision: int = 6,
     # PRECISION EXPLAINED: When converting text glyphs to path coordinates,
     # we use decimal numbers like 123.456789. Precision controls how many
@@ -127,11 +126,9 @@ def convert_minidom_document(
     # - precision=6  →  123.456789  (default, good balance)
     # - precision=12 →  123.456789012345  (huge files, unnecessary accuracy)
     # Most cases: precision=4-6 is perfect. You won't see visual differences.
-
     preserve_styles: bool = False,
     # WHY: If True, converted paths keep CSS classes/style attributes from
     # original text. Useful if you want to change colors via CSS later.
-
     converter: Text2PathConverter | None = None,
     # WHY: Allows reusing a converter with a pre-warmed FontCache across
     # multiple conversions. This is a HUGE performance boost when converting
@@ -571,19 +568,15 @@ def inspect_svg_dom(doc: minidom.Document) -> dict[str, object]:
         # For <svg>, this returns "svg"
         # For <text>, this returns "text"
         "root_tag": svg.tagName,
-
         # MINIDOM API: .getAttribute(name) reads an XML attribute value
         # Returns empty string "" if attribute doesn't exist (not None!)
         # This is different from Python dicts which return None for missing keys
         "width": svg.getAttribute("width"),
         # Reads <svg width="400"> → returns "400"
-
         "height": svg.getAttribute("height"),
         # Reads <svg height="600"> → returns "600"
-
         "viewBox": svg.getAttribute("viewBox"),
         # Reads <svg viewBox="0 0 400 600"> → returns "0 0 400 600"
-
         "elements": {},
         # Will be filled with element counts below
     }

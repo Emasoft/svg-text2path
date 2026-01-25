@@ -207,8 +207,7 @@ def batch_compare(
     # Find text*.svg files
     skip_set = set(skip)
     svg_files = [
-        f for f in sorted(samples_dir.glob("text*.svg"))
-        if f.name not in skip_set
+        f for f in sorted(samples_dir.glob("text*.svg")) if f.name not in skip_set
     ]
 
     if not svg_files:
@@ -259,10 +258,14 @@ def batch_compare(
     cmd = [
         "npx",
         "sbb-compare",
-        "--batch", str(pairs_path),
-        "--threshold", str(int(threshold * 10)),  # sbb-compare uses integer threshold
-        "--scale", str(scale),
-        "--resolution", resolution,
+        "--batch",
+        str(pairs_path),
+        "--threshold",
+        str(int(threshold * 10)),  # sbb-compare uses integer threshold
+        "--scale",
+        str(scale),
+        "--resolution",
+        resolution,
         "--json",
     ]
 
@@ -410,7 +413,8 @@ def batch_regression(
     # Find text*.svg files
     skip_set = set(skip)
     svg_files = [
-        f for f in sorted(samples_dir.glob("text*.svg"))
+        f
+        for f in sorted(samples_dir.glob("text*.svg"))
         if f.name not in skip_set and "-paths" not in f.name
     ]
 
@@ -459,11 +463,16 @@ def batch_regression(
 
     if sbb_comparer.exists():
         cmd = [
-            "node", str(sbb_comparer),
-            "--batch", str(pairs_path),
-            "--threshold", str(threshold),
-            "--scale", str(scale),
-            "--resolution", resolution,
+            "node",
+            str(sbb_comparer),
+            "--batch",
+            str(pairs_path),
+            "--threshold",
+            str(threshold),
+            "--scale",
+            str(scale),
+            "--resolution",
+            resolution,
             "--json",
         ]
     else:
@@ -472,11 +481,16 @@ def batch_regression(
         pairs_json = [{"a": a, "b": b} for a, b in pairs]
         pairs_json_path.write_text(json.dumps(pairs_json))
         cmd = [
-            "npx", "sbb-compare",
-            "--batch", str(pairs_json_path),
-            "--threshold", str(threshold),
-            "--scale", str(scale),
-            "--resolution", resolution,
+            "npx",
+            "sbb-compare",
+            "--batch",
+            str(pairs_json_path),
+            "--threshold",
+            str(threshold),
+            "--scale",
+            str(scale),
+            "--resolution",
+            resolution,
             "--json",
         ]
 
@@ -532,15 +546,17 @@ def batch_regression(
                 regressions.append((name, prev_results[name], diff))
 
     # Append current run to registry
-    registry_data.append({
-        "timestamp": timestamp,
-        "threshold": threshold,
-        "scale": scale,
-        "resolution": resolution,
-        "precision": precision,
-        "results": result_map,
-        "failures": failures,
-    })
+    registry_data.append(
+        {
+            "timestamp": timestamp,
+            "threshold": threshold,
+            "scale": scale,
+            "resolution": resolution,
+            "precision": precision,
+            "results": result_map,
+            "failures": failures,
+        }
+    )
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(json.dumps(registry_data, indent=2))
 

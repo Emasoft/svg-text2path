@@ -4838,9 +4838,7 @@ def convert_svg_text_to_paths(
                         parent.remove(text_elem)
                         parent.insert(idx, group_elem)
                         converted += 1
-                        print(
-                            f"    Converted ({tspan_converted} spans)"
-                        )
+                        print(f"    Converted ({tspan_converted} spans)")
                         continue
 
                 def span_anchor(span: Element, fallback: str) -> str:
@@ -5205,9 +5203,7 @@ def convert_svg_text_to_paths(
                                 cursor += width
                             else:
                                 if elem_id == "text4":
-                                    dbg(
-                                        "DEBUG text4: result_inner=None (line_single)"
-                                    )
+                                    dbg("DEBUG text4: result_inner=None (line_single)")
                                 raise RuntimeError(
                                     f"Failed to convert span in element {elem_id}"
                                 )
@@ -5355,9 +5351,7 @@ def convert_svg_text_to_paths(
                                     tspan_converted += 1
                                 else:
                                     if elem_id == "text4":
-                                        dbg(
-                                            "DEBUG text4: result_inner=None (measured)"
-                                        )
+                                        dbg("DEBUG text4: result_inner=None (measured)")
                                     raise RuntimeError(
                                         f"Failed to convert span in element {elem_id}"
                                     )
@@ -5544,6 +5538,7 @@ def compare_svgs(input_path: Path, output_path: Path, open_html: bool = True) ->
 
 def get_visual_bboxes(svg_path: Path, elem_ids: list = None) -> dict:
     """Get visual bboxes for elements in SVG using sbb-getbbox (npm svg-bbox)"""
+    json_output_path: Path | None = None
     try:
         json_output_path = svg_path.with_suffix(f".bbox_{uuid.uuid4()}.json")
 
@@ -5577,7 +5572,7 @@ def get_visual_bboxes(svg_path: Path, elem_ids: list = None) -> dict:
 
     except Exception as e:
         print(f"  ⚠️  Failed to get visual bboxes: {e}")
-        if "json_output_path" in locals() and json_output_path.exists():
+        if json_output_path is not None and json_output_path.exists():
             json_output_path.unlink()
         return {}
 
@@ -5601,6 +5596,8 @@ def measure_bbox_with_font(
             tmp_path = Path(tmp.name)
         tree = ET.parse(svg_path)
         root = tree.getroot()
+        if root is None:
+            return None
         if font_family or weight:
             for elem in root.iter():
                 if elem.get("id") == target_id:
@@ -5721,10 +5718,10 @@ def choose_fallback_by_bbox(
     target_w, target_h = target_bbox
     best = None  # (score, family, weight)
     best_score = float("inf")
-    weights = weights or [None]
-    base_w = base_weight or (weights[0] if weights else None)
+    weight_list: list[int | None] = list(weights) if weights else [None]
+    base_w = base_weight or (weight_list[0] if weight_list else None)
     for fam in candidates:
-        for wgt in weights:
+        for wgt in weight_list:
             dims = measure_bbox_with_font(svg_path, target_id, fam, weight=wgt)
             if not dims:
                 continue
@@ -5875,6 +5872,9 @@ def apply_visual_correction(input_path: Path, output_path: Path) -> None:
         register_namespace("", "http://www.w3.org/2000/svg")
         tree = ET.parse(input_path)
         root = tree.getroot()
+        if root is None:
+            print("  ⚠️  Input SVG has no root element.")
+            return
         input_ids = []
         for elem in root.iter():
             # We care about text, tspan, textPath
@@ -5906,6 +5906,9 @@ def apply_visual_correction(input_path: Path, output_path: Path) -> None:
         register_namespace("", "http://www.w3.org/2000/svg")
         tree = ET.parse(output_path)
         root = tree.getroot()
+        if root is None:
+            print("  ⚠️  Output SVG has no root element.")
+            return
 
         # Map IDs to elements
         id_map = {}
@@ -5980,8 +5983,7 @@ def main():
         type=int,
         default=28,
         help=(
-            "Decimal places for path coordinates "
-            "(use 6 to match Inkscape path size)."
+            "Decimal places for path coordinates (use 6 to match Inkscape path size)."
         ),
     )
     parser.add_argument(

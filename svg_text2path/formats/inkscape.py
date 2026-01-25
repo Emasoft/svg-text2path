@@ -234,7 +234,7 @@ class InkscapeHandler(FormatHandler):
         """
         try:
             root = ET.fromstring(svg_str)
-            return cast(ElementTree, ET.ElementTree(root))
+            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG string: {e}") from e
 

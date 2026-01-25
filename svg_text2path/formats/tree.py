@@ -68,7 +68,7 @@ class TreeHandler(FormatHandler):
 
         # Element - wrap in ElementTree
         if hasattr(source, "tag"):
-            return cast("ElementTree", ET.ElementTree(source))
+            return cast("ElementTree", ET.ElementTree(source))  # type: ignore[reportAttributeAccessIssue]
 
         # BeautifulSoup - convert to ElementTree
         type_name = type(source).__name__
@@ -129,7 +129,7 @@ class TreeHandler(FormatHandler):
 
             # Parse with defusedxml
             root = ET.fromstring(svg_string)
-            return cast("ElementTree", ET.ElementTree(root))
+            return cast("ElementTree", ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
         except Exception as e:
             raise SVGParseError(
                 f"Failed to convert BeautifulSoup to ElementTree: {e}"

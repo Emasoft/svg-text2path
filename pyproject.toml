@@ -1,6 +1,6 @@
 [project]
 name = "svg-text2path"
-version = "0.3.0"
+version = "0.3.1"
 description = "Convert SVG text elements to path outlines with HarfBuzz shaping"
 readme = "README.md"
 license = { text = "MIT" }
@@ -77,6 +77,12 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Visual tests contain long SVG content strings that cannot be shortened
 "tests/test_visual_comparison.py" = ["E501"]
+
+[tool.pyright]
+include = ["svg_text2path", "examples"]
+exclude = ["text2path"]  # Legacy package - being deprecated
+reportMissingTypeStubs = false
+pythonVersion = "3.10"
 
 [tool.mypy]
 python_version = "3.10"

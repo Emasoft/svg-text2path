@@ -72,7 +72,7 @@ class JSONHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return cast(ElementTree, ET.ElementTree(root))
+            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from JSON: {e}") from e
 
@@ -296,7 +296,7 @@ class CSVHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return cast(ElementTree, ET.ElementTree(root))
+            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from CSV: {e}") from e
 

@@ -232,9 +232,9 @@ class RemoteHandler(FormatHandler):
 
                 return cast(str, svg_content)
 
-        except urllib.error.HTTPError as e:
+        except urllib.error.HTTPError as e:  # type: ignore[reportAttributeAccessIssue]
             raise RemoteResourceError(url, status_code=e.code) from e
-        except urllib.error.URLError as e:
+        except urllib.error.URLError as e:  # type: ignore[reportAttributeAccessIssue]
             raise RemoteResourceError(url, details={"error": str(e.reason)}) from e
         except Exception as e:
             raise RemoteResourceError(url, details={"error": str(e)}) from e

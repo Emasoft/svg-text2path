@@ -17,10 +17,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-# Import converter components
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from main import (  # type: ignore
-    FontCache,  # type: ignore
+# Import converter components from the parent package
+from text2path.main import (
+    FontCache,
     apply_visual_correction,
     convert_svg_text_to_paths,
 )

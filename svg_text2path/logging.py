@@ -61,6 +61,7 @@ def setup_logging(
     logger.addHandler(console_handler)
 
     # File handler (if requested)
+    file_path: Path | None = None
     if log_file or log_dir:
         if log_file:
             file_path = Path(log_file)
@@ -70,20 +71,21 @@ def setup_logging(
             date_str = datetime.now().strftime("%Y%m%d")
             file_path = dir_path / f"svg_text2path_{date_str}.log"
 
-        file_handler = RotatingFileHandler(
-            file_path,
-            maxBytes=10 * 1024 * 1024,  # 10 MB
-            backupCount=5,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(logging.DEBUG)  # Always log everything to file
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
+        if file_path:
+            file_handler = RotatingFileHandler(
+                file_path,
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=5,
+                encoding="utf-8",
             )
-        )
-        logger.addHandler(file_handler)
+            file_handler.setLevel(logging.DEBUG)  # Always log everything to file
+            file_handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            logger.addHandler(file_handler)
 
     return logger
 
