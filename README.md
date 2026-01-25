@@ -30,6 +30,8 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 
 ## Installation
 
+**Requires Python 3.10-3.12** (Python 3.12 recommended for best compatibility)
+
 Three installation methods depending on your use case:
 
 ### 1. CLI Tool (End Users)
@@ -37,11 +39,11 @@ Three installation methods depending on your use case:
 Install the `text2path` command globally in an isolated environment:
 
 ```bash
-# Install
-uv tool install svg-text2path
+# Install (with recommended Python version)
+uv tool install svg-text2path --python 3.12
 
 # Upgrade to latest version
-uv tool install svg-text2path --upgrade
+uv tool install svg-text2path --python 3.12 --upgrade
 
 # Uninstall
 uv tool uninstall svg-text2path
@@ -61,22 +63,22 @@ uv add svg-text2path
 uv remove svg-text2path
 ```
 
-Use this when you want to import `svg_text2path` in your code.
+Use this when you want to import `svg_text2path` in your code. Make sure your project uses Python 3.10-3.12.
 
 ### 3. Direct Install (Virtual Environment)
 
-Install directly into the current virtual environment:
+Install directly into a virtual environment:
 
 ```bash
+# Create venv with compatible Python version
+uv venv --python 3.12
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+
 # Install
 uv pip install svg-text2path
 
 # Uninstall
 uv pip uninstall svg-text2path
-
-# Or with pip
-pip install svg-text2path
-pip uninstall svg-text2path
 ```
 
 Use this for quick testing or scripts without a `pyproject.toml`.
