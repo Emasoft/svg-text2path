@@ -92,6 +92,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Sync dependencies (creates venv and installs all deps)
 uv sync --all-extras
 
+# Install pre-push hook (runs lint, typecheck, format, tests before push)
+cp scripts/pre-push.sh .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+
 # Run tests
 uv run pytest tests/ -v
 
@@ -342,7 +346,11 @@ FontNotFoundError: Font not found: CustomFont (weight=400, style=normal)
 
 **Solutions:**
 
-1. Install the missing font on your system
+1. Install the missing font using [FontGet](https://github.com/Graphixa/FontGet) or [fnt](https://github.com/alexmyczko/fnt):
+   ```bash
+   fontget install "Noto Sans"  # or
+   fnt install "Noto Sans"
+   ```
 2. Use a font replacement in config:
    ```yaml
    replacements:
@@ -409,6 +417,27 @@ converter.convert_file("C:\Users\name\input.svg", "output.svg")
 | fontconfig | Enhanced font matching | `apt install fontconfig` |
 | Node.js | Chrome-based comparison | `brew install node` |
 | Inkscape | Reference rendering | `apt install inkscape` |
+
+### Font Installation Tools (Recommended)
+
+Need more fonts? These tools make installing fonts easy:
+
+| Tool | Description | Link |
+|------|-------------|------|
+| **FontGet** | Download and install 2700+ Google Fonts with a simple CLI | [github.com/Graphixa/FontGet](https://github.com/Graphixa/FontGet) |
+| **fnt** | Lightweight font manager for Linux/macOS, downloads from Google Fonts | [github.com/alexmyczko/fnt](https://github.com/alexmyczko/fnt) |
+
+```bash
+# FontGet - install any Google Font
+fontget install "Noto Sans"
+fontget install "Roboto Mono"
+
+# fnt - browse and install fonts
+fnt update                    # Update font list
+fnt search noto              # Search for fonts
+fnt preview "Noto Sans"      # Preview a font
+fnt install "Noto Sans"      # Install a font
+```
 
 ## Security
 

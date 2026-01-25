@@ -9,6 +9,7 @@ from svg_text2path import __version__
 
 # ANSI logo - embedded to avoid file I/O issues in installed packages
 # fmt: off
+# ruff: noqa: E501
 LOGO = (
     "  _____________   ____________        ___________              __  __________________         __  .__     \n"
     " ╱   _____╱╲   ╲ ╱   ╱  _____╱        ╲__    ___╱___ ___  ____╱  │_╲_____  ╲______   ╲_____ _╱  │_│  │__  \n"

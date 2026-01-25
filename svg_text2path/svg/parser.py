@@ -45,7 +45,7 @@ def parse_svg(source: str | Path) -> ElementTree:
         FileNotFoundError: If file doesn't exist
     """
     path = Path(source) if isinstance(source, str) else source
-    return ET.parse(str(path))
+    return ET.parse(str(path))  # type: ignore[no-any-return]
 
 
 def parse_svg_string(svg_content: str) -> Element:
@@ -60,7 +60,7 @@ def parse_svg_string(svg_content: str) -> Element:
     Raises:
         defusedxml.DefusedXmlException: If malicious content detected
     """
-    return ET.fromstring(svg_content)
+    return ET.fromstring(svg_content)  # type: ignore[no-any-return]
 
 
 def find_text_elements(root: Element) -> list[Element]:
