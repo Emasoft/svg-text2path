@@ -5,11 +5,14 @@ Handles fetching SVG content from URLs.
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 import urllib.request
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
+from xml.etree.ElementTree import ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
@@ -18,7 +21,7 @@ from svg_text2path.exceptions import RemoteResourceError, SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
+    from xml.etree.ElementTree import Element
 
 
 class RemoteHandler(FormatHandler):
@@ -32,6 +35,15 @@ class RemoteHandler(FormatHandler):
 
     # Maximum file size to download (10MB)
     MAX_SIZE = 10 * 1024 * 1024
+
+    # Blocked IP networks to prevent SSRF attacks
+    BLOCKED_NETWORKS = [
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+        ipaddress.ip_network("127.0.0.0/8"),
+        ipaddress.ip_network("169.254.0.0/16"),
+    ]
 
     def __init__(
         self,
@@ -102,14 +114,17 @@ class RemoteHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return ET.ElementTree(root)
+            return ElementTree(root)
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse remote SVG: {e}") from e
 
     def parse_element(self, source: str) -> Element:
         """Fetch and return SVG element."""
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Parsed SVG has no root element")
+        return root
 
     def serialize(self, tree: ElementTree, target: str | None = None) -> str:
         """Serialize ElementTree to SVG string.
@@ -129,6 +144,29 @@ class RemoteHandler(FormatHandler):
         tree.write(buffer, encoding="unicode", xml_declaration=True)
         return buffer.getvalue()
 
+    def _is_private_ip(self, hostname: str) -> bool:
+        """Check if hostname resolves to a private/blocked IP address.
+
+        Args:
+            hostname: Hostname to check
+
+        Returns:
+            True if hostname resolves to a blocked IP range
+
+        Note:
+            This prevents SSRF attacks by blocking private networks.
+        """
+        try:
+            # Resolve hostname to IP address
+            ip_str = socket.gethostbyname(hostname)
+            ip_addr = ipaddress.ip_address(ip_str)
+
+            # Check if IP is in any blocked network
+            return any(ip_addr in network for network in self.BLOCKED_NETWORKS)
+        except (socket.gaierror, ValueError):
+            # DNS resolution failed or invalid IP - let urllib handle the error
+            return False
+
     def fetch(self, url: str) -> str:
         """Fetch SVG content from URL.
 
@@ -139,13 +177,24 @@ class RemoteHandler(FormatHandler):
             SVG content as string
 
         Raises:
-            RemoteResourceError: If fetch fails
+            RemoteResourceError: If fetch fails or hostname is blocked (SSRF protection)
         """
         # Check cache first
         if self.cache_dir:
             cached = self._get_cached(url)
             if cached:
                 return cached
+
+        # SSRF protection: Check if hostname resolves to private IP
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if hostname and self._is_private_ip(hostname):
+            raise RemoteResourceError(
+                url,
+                details={
+                    "error": f"Access to private IPs blocked (hostname: {hostname})"
+                },
+            )
 
         try:
             req = urllib.request.Request(
@@ -181,7 +230,7 @@ class RemoteHandler(FormatHandler):
                 if self.cache_dir:
                     self._cache_content(url, svg_content)
 
-                return svg_content
+                return cast(str, svg_content)
 
         except urllib.error.HTTPError as e:
             raise RemoteResourceError(url, status_code=e.code) from e
@@ -236,9 +285,13 @@ class RemoteHandler(FormatHandler):
 
         Returns:
             Path to cache file
+
+        Note:
+            Callers must check self.cache_dir is not None before calling.
         """
         import hashlib
 
+        assert self.cache_dir is not None, "cache_dir must be set before calling"
         # Create hash of URL for filename
         url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
         parsed = urlparse(url)

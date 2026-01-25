@@ -9,9 +9,10 @@ attributes -> resolved font file (using our fuzzy matcher).
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import defusedxml.ElementTree as ET
 
 if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
@@ -110,7 +111,8 @@ def collect(
         for ch in elem:
             walk(ch, attrs)
 
-    walk(root, inherit)
+    if root is not None:
+        walk(root, inherit)
     return rows
 
 

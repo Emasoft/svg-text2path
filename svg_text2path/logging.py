@@ -37,8 +37,8 @@ def setup_logging(
     logger.handlers.clear()
     logger.setLevel(getattr(logging, level.upper(), logging.WARNING))
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stderr)
+    # Console handler - typed as Handler to allow RichHandler assignment
+    console_handler: logging.Handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logger.level)
 
     # Try rich formatting if available and requested
@@ -64,7 +64,7 @@ def setup_logging(
     if log_file or log_dir:
         if log_file:
             file_path = Path(log_file)
-        else:
+        elif log_dir is not None:
             dir_path = Path(log_dir)
             dir_path.mkdir(parents=True, exist_ok=True)
             date_str = datetime.now().strftime("%Y%m%d")
@@ -125,7 +125,7 @@ class ConversionLogger:
         self._log.info("Starting conversion: %s", self.source)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit conversion context, log summary."""
         if exc_type:
             self.errors.append(str(exc_val))
@@ -144,7 +144,7 @@ class ConversionLogger:
             )
         else:
             self._log.info("Conversion successful: %s", self.source)
-        return False  # Don't suppress exceptions
+        # Don't suppress exceptions (returning None is equivalent to False)
 
     def warning(self, message: str, *args) -> None:
         """Log a warning."""

@@ -1,12 +1,16 @@
 import argparse
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import defusedxml.ElementTree as ET
 
 
 def get_bbox(svg_path: Path) -> None:
     tree = ET.parse(svg_path)
     root = tree.getroot()
+    if root is None:
+        print("Could not parse SVG root element")
+        return
     ns = {"svg": "http://www.w3.org/2000/svg"}
 
     path = root.find(".//svg:path", ns)
@@ -44,10 +48,7 @@ def get_bbox(svg_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="t2p_analyze_path",
-        description=(
-            "Compute a rough bounding box for the first <path> in an SVG "
-            "(debug helper)."
-        ),
+        description="Compute rough bounding box for first <path> in SVG.",
         epilog="Example: t2p_analyze_path samples/test_text_to_path_advanced.svg",
     )
     parser.add_argument("svg", type=Path, help="SVG file containing a <path>")

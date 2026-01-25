@@ -9,7 +9,8 @@ import csv
 import json
 import re
 from io import StringIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from xml.etree.ElementTree import ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
@@ -71,14 +72,17 @@ class JSONHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return ET.ElementTree(root)
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from JSON: {e}") from e
 
     def parse_element(self, source: str) -> Element:
         """Parse JSON and return SVG element."""
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Parsed SVG has no root element")
+        return root
 
     def serialize(self, tree: ElementTree, target: str | None = None) -> str:
         """Serialize ElementTree to JSON with SVG.
@@ -217,17 +221,17 @@ class JSONHandler(FormatHandler):
             return result
 
         if isinstance(value, list):
-            result = []
+            list_result: list[Any] = []
             replaced = False
             for item in value:
                 if not replaced:
                     new_item = self._replace_svg_in_value(item, new_svg)
                     if new_item != item:
                         replaced = True
-                    result.append(new_item)
+                    list_result.append(new_item)
                 else:
-                    result.append(item)
-            return result
+                    list_result.append(item)
+            return list_result
 
         return value
 
@@ -292,14 +296,17 @@ class CSVHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return ET.ElementTree(root)
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from CSV: {e}") from e
 
     def parse_element(self, source: str) -> Element:
         """Parse CSV and return SVG element."""
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Parsed SVG has no root element")
+        return root
 
     def serialize(self, tree: ElementTree, target: str | None = None) -> str:
         """Serialize ElementTree to CSV with SVG.

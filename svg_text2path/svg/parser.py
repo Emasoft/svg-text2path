@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+from xml.etree.ElementTree import Element, ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
+    pass  # Types imported above for runtime use with cast()
 
 
 # SVG namespace
@@ -132,9 +133,12 @@ def write_svg(tree: ElementTree, output_path: str | Path) -> None:
         tree: ElementTree to write
         output_path: Output file path
     """
-    # Register namespaces to avoid ns0: prefixes
+    # Register namespaces to avoid ns0: prefixes.
+    # Empty prefix for SVG (default namespace) outputs <svg> not <svg:svg>
+    _register_namespace("", SVG_NS)
     for prefix, uri in NAMESPACES.items():
-        _register_namespace(prefix, uri)
+        if prefix != "svg":  # Skip svg prefix - use default namespace instead
+            _register_namespace(prefix, uri)
 
     path = Path(output_path) if isinstance(output_path, str) else output_path
     tree.write(str(path), encoding="unicode", xml_declaration=True)

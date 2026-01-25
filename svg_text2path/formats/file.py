@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from xml.etree.ElementTree import ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
@@ -16,7 +17,7 @@ from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import ElementTree
+    pass  # ElementTree imported above for cast()
 
 
 class FileHandler(FormatHandler):
@@ -71,10 +72,10 @@ class FileHandler(FormatHandler):
             # Handle compressed SVG
             if path.suffix.lower() == ".svgz" or self._is_gzipped(path):
                 with gzip.open(path, "rt", encoding="utf-8") as f:
-                    return ET.parse(f)
+                    return cast(ElementTree, ET.parse(f))
 
             # Regular SVG
-            return ET.parse(str(path))
+            return cast(ElementTree, ET.parse(str(path)))
 
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG: {e}") from e

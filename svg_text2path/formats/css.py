@@ -9,7 +9,8 @@ import base64
 import re
 import urllib.parse
 from io import StringIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from xml.etree.ElementTree import ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
@@ -18,7 +19,7 @@ from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
+    from xml.etree.ElementTree import Element
 
 
 class CSSHandler(FormatHandler):
@@ -64,7 +65,7 @@ class CSSHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return ET.ElementTree(root)
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from CSS data URI: {e}") from e
 
@@ -78,7 +79,10 @@ class CSSHandler(FormatHandler):
             First SVG Element found
         """
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Parsed SVG has no root element")
+        return root
 
     def serialize(self, tree: ElementTree, target: str | None = None) -> str:
         """Serialize ElementTree back to CSS with SVG data URI.

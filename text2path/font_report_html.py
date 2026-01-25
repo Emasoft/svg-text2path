@@ -19,9 +19,13 @@ from __future__ import annotations
 import contextlib
 import re
 import subprocess
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from xml.etree.ElementTree import (
+    Element,  # For type hints (defusedxml doesn't export Element)
+)
+
+import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
 
 import text2path.main as main_module
 
@@ -31,7 +35,7 @@ if TYPE_CHECKING:
 
 def load_main() -> ModuleType:
     """Load the main module."""
-    return main_module  # type: ignore[no-any-return]
+    return main_module
 
 
 def parse_style(style_str: str) -> dict[str, str]:
@@ -48,7 +52,7 @@ def parse_style(style_str: str) -> dict[str, str]:
 
 def extract_font_info(font_path: Path | None) -> dict[str, str]:
     """Extract font metadata from a font file."""
-    from fontTools.ttLib import TTFont
+    from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 
     info: dict[str, str] = {
         "family": "n.a.",
@@ -94,14 +98,14 @@ def extract_font_info(font_path: Path | None) -> dict[str, str]:
 
 def normalize_stretch(val: str | None) -> str:
     """Normalize stretch value for comparison."""
-    if val in ("n.a.", "", None):
+    if val is None or val in ("n.a.", ""):
         return "n.a."
     try:
-        if int(val) == 5:  # type: ignore[arg-type]
+        if int(val) == 5:
             return "normal"
-    except Exception:
+    except (ValueError, TypeError):
         pass
-    return val  # type: ignore[return-value]
+    return val
 
 
 def generate(svg_path: Path, out_html: Path) -> Path:
@@ -127,7 +131,7 @@ def generate(svg_path: Path, out_html: Path) -> Path:
     rows: list[dict[str, Any]] = []
     auto = 0
 
-    def walk(elem: ET.Element, inherited: dict[str, str]) -> None:
+    def walk(elem: Element, inherited: dict[str, str]) -> None:
         nonlocal auto
         attrs = dict(inherited)
         style_map = parse_style(elem.get("style", ""))
@@ -161,7 +165,11 @@ def generate(svg_path: Path, out_html: Path) -> Path:
             resolved_name = "n.a."
             try:
                 res = fc.get_font(
-                    fam, weight=w_int, style=style, stretch=stretch, inkscape_spec=None
+                    fam,
+                    weight=w_int,
+                    style=style,
+                    stretch=stretch,
+                    inkscape_spec=None,
                 )
                 if res:
                     resolved_path = Path(res[0].reader.file.name)
@@ -183,7 +191,11 @@ def generate(svg_path: Path, out_html: Path) -> Path:
         for ch in elem:
             walk(ch, attrs)
 
-    root = ET.parse(svg_path).getroot()
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    if root is None:
+        msg = f"Could not parse SVG: {svg_path}"
+        raise ValueError(msg)
     walk(root, inherit)
 
     html_rows: list[str] = []
@@ -329,7 +341,9 @@ def main() -> None:
         help="Output HTML file",
     )
     ap.add_argument(
-        "--open", action="store_true", help="Open the HTML in Chrome after generation"
+        "--open",
+        action="store_true",
+        help="Open the HTML in Chrome after generation",
     )
     args = ap.parse_args()
     out = generate(args.svg, args.out)

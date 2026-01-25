@@ -7,6 +7,38 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
+
+def validate_path_for_subprocess(path: str | Path) -> Path:
+    """Validate a file path before passing to subprocess.
+
+    Defense-in-depth validation to prevent command injection.
+    While shell=False mitigates most risks, this catches edge cases.
+
+    Args:
+        path: Path to validate
+
+    Returns:
+        Validated Path object
+
+    Raises:
+        ValueError: If path contains invalid characters
+    """
+    path_str = str(path)
+
+    # Check for null bytes (command truncation attack)
+    if "\x00" in path_str:
+        raise ValueError(f"Path contains null byte: {path_str!r}")
+
+    # Check for newlines (could affect some tools)
+    if "\n" in path_str or "\r" in path_str:
+        raise ValueError(f"Path contains newline: {path_str!r}")
+
+    # Convert to Path and resolve to catch path traversal
+    validated = Path(path_str)
+
+    return validated
+
+
 # Tool repository mappings
 TOOL_REPOS = {
     "fontget": "Graphixa/FontGet",

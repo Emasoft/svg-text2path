@@ -9,7 +9,8 @@ from __future__ import annotations
 import gzip
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from xml.etree.ElementTree import ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
@@ -18,7 +19,7 @@ from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
+    from xml.etree.ElementTree import Element
 
 
 # Inkscape namespaces
@@ -95,14 +96,19 @@ class InkscapeHandler(FormatHandler):
             tree = self._parse_string(source)
 
         if self.strip_inkscape:
-            self._strip_inkscape_content(tree.getroot())
+            root = tree.getroot()
+            if root is not None:
+                self._strip_inkscape_content(root)
 
         return tree
 
     def parse_element(self, source: str | Path) -> Element:
         """Parse and return root element."""
         tree = self.parse(source)
-        return tree.getroot()
+        root = tree.getroot()
+        if root is None:
+            raise SVGParseError("Parsed SVG has no root element")
+        return root
 
     def serialize(
         self, tree: ElementTree, target: str | Path | None = None
@@ -152,6 +158,13 @@ class InkscapeHandler(FormatHandler):
             Dictionary of Inkscape metadata
         """
         root = tree.getroot()
+        if root is None:
+            return {
+                "version": None,
+                "output_extension": None,
+                "layers": [],
+                "guides": [],
+            }
         metadata: dict[str, Any] = {
             "version": root.get(f"{{{INKSCAPE_NS}}}version"),
             "output_extension": root.get(f"{{{INKSCAPE_NS}}}output_extension"),
@@ -186,7 +199,9 @@ class InkscapeHandler(FormatHandler):
         Args:
             tree: ElementTree to modify in place
         """
-        self._strip_inkscape_content(tree.getroot())
+        root = tree.getroot()
+        if root is not None:
+            self._strip_inkscape_content(root)
 
     def _parse_file(self, path: Path) -> ElementTree:
         """Parse SVG file.
@@ -203,8 +218,8 @@ class InkscapeHandler(FormatHandler):
         try:
             if path.suffix.lower() == ".svgz" or self._is_gzipped(path):
                 with gzip.open(path, "rt", encoding="utf-8") as f:
-                    return ET.parse(f)
-            return ET.parse(str(path))
+                    return cast(ElementTree, ET.parse(f))
+            return cast(ElementTree, ET.parse(str(path)))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG: {e}") from e
 
@@ -219,7 +234,7 @@ class InkscapeHandler(FormatHandler):
         """
         try:
             root = ET.fromstring(svg_str)
-            return ET.ElementTree(root)
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG string: {e}") from e
 

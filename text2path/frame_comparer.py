@@ -21,10 +21,10 @@ import argparse
 import json
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+import defusedxml.ElementTree as ET
 import numpy as np
 from PIL import Image
 
@@ -36,7 +36,11 @@ def pixel_tol_to_threshold(pixel_tol: float) -> int:
 
 
 def run_sbb_comparer(
-    svg1: Path, svg2: Path, output_dir: Path, pixel_tol: float, no_html: bool
+    svg1: Path,
+    svg2: Path,
+    output_dir: Path,
+    pixel_tol: float,
+    no_html: bool,
 ) -> dict[str, Any] | None:
     """Run sbb-comparer.cjs and return parsed JSON result."""
     sbb_comparer_script = Path(__file__).parent.parent / "SVG-BBOX" / "sbb-comparer.cjs"
@@ -103,6 +107,8 @@ class SVGRenderer:
     def _parse_svg_dimensions(svg_path: Path) -> tuple[int, int] | None:
         try:
             root = ET.parse(svg_path).getroot()
+            if root is None:
+                return None
 
             def _num(val: str) -> float | None:
                 if val is None:
@@ -273,6 +279,8 @@ def svg_resolution(svg_path: Path) -> str:
     """Return a readable resolution string from width/height/viewBox."""
     try:
         root = ET.parse(svg_path).getroot()
+        if root is None:
+            return "unknown"
         w = root.get("width")
         h = root.get("height")
         vb = root.get("viewBox")
@@ -299,6 +307,8 @@ def svg_resolution(svg_path: Path) -> str:
 def total_path_chars(svg_path: Path) -> int:
     """Sum length of all path 'd' attributes in an SVG (namespace aware)."""
     root = ET.parse(svg_path).getroot()
+    if root is None:
+        return 0
     total = 0
     for el in root.iter():
         tag = el.tag
@@ -441,7 +451,10 @@ def main() -> int:
         help="Directory to store HTML comparison history (default: ./history)",
     )
     parser.add_argument(
-        "--precision", type=int, default=None, help="Ignored (compatibility)."
+        "--precision",
+        type=int,
+        default=None,
+        help="Ignored (compatibility).",
     )
     parser.add_argument(
         "--no-html",

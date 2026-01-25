@@ -88,6 +88,8 @@ class FontCache:
     _cache_version: int = 4
     _prebaked: dict[str, list[dict[str, object]]] | None = None
     _cache_partial: bool = False
+    # Cache fc-match subprocess results: pattern -> (Path, face_index) | None
+    _fc_match_cache: dict[str, tuple[Path, int] | None] = {}
 
     def _font_dirs(self) -> list[Path]:
         """Return platform-specific font directories."""
@@ -535,6 +537,28 @@ class FontCache:
 
     def _normalize_style_name(self, name: str) -> str:
         n = name.lower().strip()
+        # Localized style name translations (ES, CA, DE, FR, IT, PT, NL)
+        # Bold variants
+        n = n.replace("negreta", "bold")  # Catalan
+        n = n.replace("negrita", "bold")  # Spanish
+        n = n.replace("fett", "bold")  # German
+        n = n.replace("gras", "bold")  # French
+        n = n.replace("grassetto", "bold")  # Italian
+        n = n.replace("negrito", "bold")  # Portuguese
+        n = n.replace("vet", "bold")  # Dutch
+        # Italic variants
+        n = n.replace("kursiv", "italic")  # German
+        n = n.replace("cursiva", "italic")  # Spanish
+        n = n.replace("italique", "italic")  # French
+        n = n.replace("corsivo", "italic")  # Italian
+        n = n.replace("itálico", "italic")  # Portuguese
+        n = n.replace("cursief", "italic")  # Dutch
+        # Light variants
+        n = n.replace("leicht", "light")  # German
+        n = n.replace("ligera", "light")  # Spanish
+        n = n.replace("léger", "light")  # French (without accent handled below)
+        n = n.replace("leger", "light")  # French (simplified)
+        n = n.replace("leggero", "light")  # Italian
         # Inkscape canonicalization
         n = n.replace("semi-light", "light")
         n = n.replace("book", "normal")
@@ -565,10 +589,12 @@ class FontCache:
         Lower scores are better. This helps prefer Regular over Bold when the
         desired style tokens are empty (e.g., weight=400, style=normal).
         """
-        weight_class = self._style_weight_class([style_str])
+        # Normalize style string to convert localized names (e.g., "negreta" -> "bold")
+        normalized_style = self._normalize_style_name(style_str)
+        weight_class = self._style_weight_class([normalized_style])
         weight_score = abs(target_weight - weight_class)
 
-        slant = self._style_slant([style_str])
+        slant = self._style_slant([normalized_style])
         slant_score = 0
         if target_style in ("italic", "oblique"):
             if slant not in ("italic", "oblique"):
@@ -783,6 +809,14 @@ class FontCache:
                 return (path, 0)
 
         for pattern in patterns:
+            # Check cache first
+            if pattern in self._fc_match_cache:
+                cached_result = self._fc_match_cache[pattern]
+                if cached_result is not None:
+                    return cached_result
+                # Pattern was tried before but failed, try next pattern
+                continue
+
             # Retry mechanism for busy font subsystem
             max_retries = 3
             result = None
@@ -811,13 +845,24 @@ class FontCache:
                         font_index = int(lines[1]) if lines[1].isdigit() else 0
                         if font_file.exists():
                             if font_file.suffix.lower() == ".ttc":
-                                return pick_face(
+                                matched = pick_face(
                                     font_file,
                                     self._build_style_label(weight, style, stretch),
                                 )
-                            return (font_file, font_index)
+                                # Cache the result
+                                self._fc_match_cache[pattern] = matched
+                                return matched
+                            # Cache the result
+                            matched_result = (font_file, font_index)
+                            self._fc_match_cache[pattern] = matched_result
+                            return matched_result
                 except Exception:
+                    # Cache failure for this pattern
+                    self._fc_match_cache[pattern] = None
                     continue
+            else:
+                # Cache failure for this pattern
+                self._fc_match_cache[pattern] = None
 
         return None
 
@@ -917,16 +962,14 @@ class FontCache:
                 family_mismatch = _norm(fam_candidate) != _norm(font_family)
                 not_subset = _norm(font_family) not in _norm(fam_candidate)
                 if strict_family and not is_generic and family_mismatch and not_subset:
-                    print(
-                        f"Font mismatch: got '{fam_candidate}' "
-                        f"for requested '{font_family}'. Using anyway."
-                    )
+                    msg = f"Font mismatch: got '{fam_candidate}' "
+                    msg += f"for requested '{font_family}'. Using anyway."
+                    print(msg)
 
                 self._fonts[cache_key] = (ttfont, font_blob, font_index)
-                print(
-                    f"Loaded: {font_family} w={weight} s={style} "
-                    f"st={stretch} -> {font_path.name}:{font_index}"
-                )
+                load_msg = f"Loaded: {font_family} w={weight} s={style} "
+                load_msg += f"st={stretch} -> {font_path.name}:{font_index}"
+                print(load_msg)
 
             except Exception as e:
                 print(f"✗ Failed to load {font_path}:{font_index}: {e}")

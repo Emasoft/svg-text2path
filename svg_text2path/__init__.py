@@ -22,8 +22,17 @@ from svg_text2path.exceptions import (
     Text2PathError,
 )
 from svg_text2path.fonts.cache import FontCache
+from svg_text2path.tools.dependencies import (
+    DependencyInfo,
+    DependencyReport,
+    DependencyStatus,
+    DependencyType,
+    format_dependency_report,
+    print_dependency_report,
+    verify_all_dependencies,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Emasoft"
 __email__ = "713559+Emasoft@users.noreply.github.com"
 
@@ -40,6 +49,14 @@ __all__ = [
     "SVGParseError",
     "ConversionError",
     "FormatNotSupportedError",
+    # Dependency verification
+    "verify_all_dependencies",
+    "print_dependency_report",
+    "format_dependency_report",
+    "DependencyReport",
+    "DependencyInfo",
+    "DependencyStatus",
+    "DependencyType",
     # Metadata
     "__version__",
 ]

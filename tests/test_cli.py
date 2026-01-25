@@ -36,7 +36,9 @@ class TestCLIMain:
     def test_cli_shows_help_text(self, runner: CliRunner) -> None:
         """CLI --help shows usage information and available commands."""
         result = runner.invoke(cli, ["--help"])
-        assert result.exit_code == 0, f"Expected exit code 0, got {result.exit_code}: {result.output}"
+        assert result.exit_code == 0, (
+            f"Expected exit code 0, got {result.exit_code}: {result.output}"
+        )
         # Check help contains expected command group description
         assert "Convert SVG text elements" in result.output
         # Check subcommands are listed
@@ -54,19 +56,27 @@ class TestCLIMain:
 class TestConvertCommand:
     """Tests for the convert subcommand."""
 
-    def test_convert_accepts_input_file_argument(self, runner: CliRunner, temp_svg_file: Path) -> None:
+    def test_convert_accepts_input_file_argument(
+        self, runner: CliRunner, temp_svg_file: Path
+    ) -> None:
         """Convert command accepts an input file path as argument."""
         result = runner.invoke(cli, ["convert", str(temp_svg_file)])
-        # Command should run without argument errors (may fail on font resolution but that's OK)
-        # We're testing CLI argument parsing, not full conversion
-        assert result.exit_code in (0, 1), f"Unexpected exit code {result.exit_code}: {result.output}"
+        # Command should run without argument errors (may fail on font
+        # resolution but that's OK). We're testing CLI argument parsing.
+        assert result.exit_code in (0, 1), (
+            f"Unexpected exit code {result.exit_code}: {result.output}"
+        )
         # Should not show "Missing argument" error
         assert "Missing argument" not in result.output
 
-    def test_convert_with_output_option(self, runner: CliRunner, temp_svg_file: Path, tmp_path: Path) -> None:
+    def test_convert_with_output_option(
+        self, runner: CliRunner, temp_svg_file: Path, tmp_path: Path
+    ) -> None:
         """Convert command --output option specifies output file path."""
         output_file = tmp_path / "output.svg"
-        result = runner.invoke(cli, ["convert", str(temp_svg_file), "--output", str(output_file)])
+        result = runner.invoke(
+            cli, ["convert", str(temp_svg_file), "--output", str(output_file)]
+        )
         # Check that the --output option is parsed correctly (no argument errors)
         assert "Error: Invalid value for '--output'" not in result.output
         assert "Missing argument" not in result.output
@@ -81,20 +91,36 @@ class TestConvertCommand:
 
 
 class TestBatchCommand:
-    """Tests for the batch subcommand."""
+    """Tests for the batch subcommand (now a command group with subcommands)."""
 
-    def test_batch_with_output_dir_option(self, runner: CliRunner, temp_svg_file: Path, tmp_path: Path) -> None:
-        """Batch command --output-dir option specifies output directory."""
+    def test_batch_help_shows_subcommands(self, runner: CliRunner) -> None:
+        """Batch command --help shows available batch subcommands."""
+        result = runner.invoke(cli, ["batch", "--help"])
+        assert result.exit_code == 0
+        # Check batch subcommands are listed
+        assert "convert" in result.output
+        assert "compare" in result.output
+        assert "regression" in result.output
+
+    def test_batch_convert_with_output_dir_option(
+        self, runner: CliRunner, temp_svg_file: Path, tmp_path: Path
+    ) -> None:
+        """Batch convert --output-dir option specifies output directory."""
         output_dir = tmp_path / "batch_output"
-        result = runner.invoke(cli, ["batch", str(temp_svg_file), "--output-dir", str(output_dir)])
+        result = runner.invoke(
+            cli,
+            ["batch", "convert", str(temp_svg_file), "--output-dir", str(output_dir)],
+        )
         # Check that --output-dir is parsed (no argument errors)
         assert "Error: Invalid value for '--output-dir'" not in result.output
         # Exit code may be 0 or 1 depending on font availability
         assert result.exit_code in (0, 1), f"Unexpected exit: {result.output}"
 
-    def test_batch_requires_output_dir(self, runner: CliRunner, temp_svg_file: Path) -> None:
-        """Batch command fails without required --output-dir option."""
-        result = runner.invoke(cli, ["batch", str(temp_svg_file)])
+    def test_batch_convert_requires_output_dir(
+        self, runner: CliRunner, temp_svg_file: Path
+    ) -> None:
+        """Batch convert fails without required --output-dir option."""
+        result = runner.invoke(cli, ["batch", "convert", str(temp_svg_file)])
         assert result.exit_code != 0
         # Should indicate missing required option
         assert "Missing option" in result.output or "--output-dir" in result.output

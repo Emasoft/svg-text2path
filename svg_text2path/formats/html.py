@@ -7,16 +7,14 @@ from __future__ import annotations
 
 import re
 from io import StringIO
-from typing import TYPE_CHECKING, Any
+from typing import Any, cast
+from xml.etree.ElementTree import Element, ElementTree
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
 
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
-
-if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element, ElementTree
 
 
 class HTMLHandler(FormatHandler):
@@ -74,15 +72,15 @@ class HTMLHandler(FormatHandler):
 
         # If single SVG, return it directly
         if len(svg_elements) == 1:
-            return ET.ElementTree(svg_elements[0])
+            return cast(ElementTree, ET.ElementTree(svg_elements[0]))
 
         # Multiple SVGs - wrap in container
-        container = ET.Element("{http://www.w3.org/2000/svg}svg")
+        container = cast(Element, ET.Element("{http://www.w3.org/2000/svg}svg"))
         container.set("xmlns", "http://www.w3.org/2000/svg")
         for svg in svg_elements:
             container.append(svg)
 
-        return ET.ElementTree(container)
+        return cast(ElementTree, ET.ElementTree(container))
 
     def parse_element(self, source: str) -> Element:
         """Parse HTML and return first SVG element.
@@ -156,7 +154,7 @@ class HTMLHandler(FormatHandler):
                     svg_str = svg_str.replace(
                         "<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1
                     )
-                elem = ET.fromstring(svg_str)
+                elem = cast(Element, ET.fromstring(svg_str))
                 svg_elements.append(elem)
             except ET.ParseError:
                 continue

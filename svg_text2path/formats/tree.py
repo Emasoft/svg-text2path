@@ -58,7 +58,7 @@ class TreeHandler(FormatHandler):
         Raises:
             SVGParseError: If parsing fails
         """
-        import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
+        import defusedxml.ElementTree as ET
 
         from svg_text2path.exceptions import SVGParseError
 

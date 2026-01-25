@@ -2,15 +2,158 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+import defusedxml.ElementTree as ET
 from rich.console import Console
 from rich.table import Table
 
 from svg_text2path.fonts import FontCache
 
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
+
 console = Console()
+
+
+def parse_style(style_str: str | None) -> dict[str, str]:
+    """Parse CSS style string into a dictionary.
+
+    Args:
+        style_str: CSS style string (e.g., "font-family: Arial; font-weight: bold")
+
+    Returns:
+        Dictionary mapping property names to values.
+    """
+    if not style_str:
+        return {}
+    out: dict[str, str] = {}
+    for part in style_str.split(";"):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+# Type alias for font report row data
+FontRow = tuple[str, str | None, str | None, str | None, str | None, str, str]
+
+
+def collect_font_inheritance(
+    svg_path: Path,
+    cache: FontCache,
+    include_variation: bool = False,
+    resolve_files: bool = False,
+) -> list[FontRow]:
+    """Collect font information from all text elements with CSS inheritance.
+
+    Walks the SVG tree and tracks inherited font properties, resolving
+    final values for each text element.
+
+    Args:
+        svg_path: Path to the SVG file.
+        cache: FontCache instance for resolving font files.
+        include_variation: Whether to include font-variation-settings.
+        resolve_files: Whether to resolve actual font file paths.
+
+    Returns:
+        List of tuples: (id, family, weight, style, stretch, variation, resolved_file)
+    """
+    root = ET.parse(svg_path).getroot()
+    keys = [
+        "font-family",
+        "font-weight",
+        "font-style",
+        "font-stretch",
+        "font-variation-settings",
+    ]
+    # Default inherited values (CSS initial values)
+    inherit: dict[str, str | None] = {
+        "font-family": "sans-serif",
+        "font-weight": "400",
+        "font-style": "normal",
+        "font-stretch": "normal",
+        "font-variation-settings": None,
+    }
+    rows: list[FontRow] = []
+    auto_id = 0
+
+    def walk(elem: Element, inherited: dict[str, str | None]) -> None:
+        """Recursively walk SVG tree collecting font attributes with inheritance."""
+        nonlocal auto_id
+        # Start with inherited values
+        attrs = dict(inherited)
+        # Parse inline style attribute
+        style_map = parse_style(elem.get("style", ""))
+        # Override with explicit attributes or style values
+        for k in keys:
+            if k in elem.attrib:
+                attrs[k] = elem.get(k)
+            elif k in style_map:
+                attrs[k] = style_map[k]
+
+        # Strip namespace from tag
+        tag = elem.tag.split("}")[-1]
+        if tag in ("text", "tspan", "textPath"):
+            # Get or generate element ID
+            tid = elem.get("id")
+            if not tid:
+                auto_id += 1
+                tid = f"{tag}_auto_{auto_id}"
+
+            # Extract font properties
+            fam = attrs["font-family"]
+            # Normalize family: take first in comma list, strip quotes
+            if fam:
+                fam = fam.split(",")[0].strip().strip("'\"")
+            weight = attrs["font-weight"]
+            style = attrs["font-style"]
+            stretch = attrs["font-stretch"]
+            var_setting = attrs.get("font-variation-settings") or ""
+            var = var_setting if include_variation else ""
+
+            # Resolve font file if requested
+            resolved = ""
+            if resolve_files:
+                try:
+                    # Convert weight string to int
+                    if weight == "bold":
+                        w_int = 700
+                    elif weight == "normal" or weight is None:
+                        w_int = 400
+                    else:
+                        m = re.search(r"(\d+)", weight or "")
+                        w_int = int(m.group(1)) if m else 400
+
+                    res = cache.get_font(
+                        fam or "sans-serif",
+                        weight=w_int,
+                        style=style or "normal",
+                        stretch=stretch or "normal",
+                    )
+                    if res:
+                        ttfont, _blob, _idx = res
+                        # Get path from TTFont reader (null checks for reader and file)
+                        reader = getattr(ttfont, "reader", None)
+                        if reader is not None:
+                            reader_file = getattr(reader, "file", None)
+                            if reader_file is not None:
+                                resolved = Path(reader_file.name).name
+                except Exception as e:
+                    resolved = f"err:{e}"
+
+            rows.append((tid, fam, weight, style, stretch, var, resolved))
+
+        # Recurse into children with current attrs as new inherited
+        for child in elem:
+            walk(child, attrs)
+
+    if root is not None:
+        walk(root, inherit)
+    return rows
 
 
 @click.group()
@@ -108,8 +251,13 @@ def find_font(name: str) -> None:
     with console.status(f"[bold green]Searching for '{name}'..."):
         cache.prewarm()
         try:
-            font_path, font_data, face_idx = cache.get_font(name)
-            console.print(f"[green]Found:[/green] {font_path}")
+            result = cache.get_font(name)
+            if result is None:
+                console.print(f"[red]Not found:[/red] Font '{name}' not available")
+                raise SystemExit(1)
+            _font_data, _font_blob, face_idx = result
+            # Get path from cache's font info
+            console.print(f"[green]Found:[/green] {name}")
             console.print(f"[dim]Face index:[/dim] {face_idx}")
         except Exception as e:
             console.print(f"[red]Not found:[/red] {e}")
@@ -118,35 +266,103 @@ def find_font(name: str) -> None:
 
 @fonts.command("report")
 @click.argument("svg_file", type=click.Path(exists=True, path_type=Path))
-def font_report(svg_file: Path) -> None:
-    """Report fonts used in an SVG file."""
-    from svg_text2path.svg.parser import find_text_elements, parse_svg
+@click.option(
+    "--detailed", is_flag=True, help="Show resolved font files and full inheritance"
+)
+@click.option(
+    "--output", "-o", type=click.Path(path_type=Path), help="Save as markdown"
+)
+@click.option(
+    "--variation", is_flag=True, help="Include font-variation-settings column"
+)
+def font_report(
+    svg_file: Path,
+    detailed: bool,
+    output: Path | None,
+    variation: bool,
+) -> None:
+    """Report fonts used in an SVG file with inheritance resolution.
 
-    tree = parse_svg(svg_file)
-    root = tree.getroot()
-    if root is None:
-        console.print("[red]Error: Could not parse SVG file[/red]")
-        raise SystemExit(1)
-    text_elements = find_text_elements(root)
+    Shows font properties for each text element, tracking CSS inheritance
+    through the SVG tree. Use --detailed to resolve actual font file paths.
+    """
+    cache = FontCache()
 
-    fonts_used: dict[tuple[str, str, str], list[str]] = {}
-    for elem in text_elements:
-        font_family = elem.get("font-family", "sans-serif")
-        font_weight = elem.get("font-weight", "400")
-        font_style = elem.get("font-style", "normal")
+    # Prewarm cache if we need to resolve files
+    if detailed:
+        with console.status("[bold green]Loading font cache..."):
+            cache.prewarm()
 
-        key = (font_family, font_weight, font_style)
-        if key not in fonts_used:
-            fonts_used[key] = []
-        fonts_used[key].append(elem.get("id", "unnamed"))
+    # Collect font data with inheritance
+    with console.status(f"[bold green]Analyzing {svg_file.name}..."):
+        rows = collect_font_inheritance(
+            svg_file,
+            cache,
+            include_variation=variation,
+            resolve_files=detailed,
+        )
 
-    table = Table(title=f"Fonts in {svg_file.name}")
-    table.add_column("Family", style="cyan")
-    table.add_column("Weight", style="yellow")
-    table.add_column("Style", style="green")
-    table.add_column("Elements", style="dim")
+    if not rows:
+        console.print("[yellow]No text elements found in SVG[/yellow]")
+        return
 
-    for (family, weight, style), elements in sorted(fonts_used.items()):
-        table.add_row(family, weight, style, f"{len(elements)} elements")
+    # Build table for console output
+    table = Table(title=f"Font Report: {svg_file.name}")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("font-family", style="green")
+    table.add_column("weight", style="yellow")
+    table.add_column("style", style="magenta")
+    table.add_column("stretch", style="blue")
+    if variation:
+        table.add_column("variation", style="dim")
+    if detailed:
+        table.add_column("resolved file", style="dim")
+
+    for row in rows:
+        tid, fam, weight, style, stretch, var, resolved = row
+        row_data = [
+            tid or "-",
+            fam or "-",
+            weight or "-",
+            style or "-",
+            stretch or "-",
+        ]
+        if variation:
+            row_data.append(var or "-")
+        if detailed:
+            row_data.append(resolved or "-")
+        table.add_row(*row_data)
 
     console.print(table)
+    console.print(f"\n[bold]Total text elements:[/bold] {len(rows)}")
+
+    # Save markdown output if requested
+    if output:
+        lines: list[str] = []
+        # Build markdown header
+        header_cols = ["id", "font-family", "weight", "style", "stretch"]
+        if variation:
+            header_cols.append("variation")
+        if detailed:
+            header_cols.append("resolved file")
+        lines.append("| " + " | ".join(header_cols) + " |")
+        lines.append("|" + "|".join(["---"] * len(header_cols)) + "|")
+
+        # Add rows
+        for row in rows:
+            tid, fam, weight, style, stretch, var, resolved = row
+            row_vals = [
+                tid or "-",
+                fam or "-",
+                weight or "-",
+                style or "-",
+                stretch or "-",
+            ]
+            if variation:
+                row_vals.append(var or "-")
+            if detailed:
+                row_vals.append(resolved or "-")
+            lines.append("| " + " | ".join(str(v) for v in row_vals) + " |")
+
+        output.write_text("\n".join(lines))
+        console.print(f"[green]Saved report to:[/green] {output}")

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    from bidi.algorithm import (  # type: ignore[import-untyped]
+    from bidi.algorithm import (
         get_base_level,
         get_display,
         get_embedding_levels,

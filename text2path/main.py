@@ -20,13 +20,18 @@ import tempfile
 import threading
 import time
 import uuid
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import (
+    Element,  # For type hints (defusedxml doesn't export Element)
+    register_namespace,  # defusedxml doesn't export this function
+)
+
+import defusedxml.ElementTree as ET
 
 # --- Logging setup --------------------------------------------------------
 LOG = logging.getLogger("t2p")
@@ -83,7 +88,7 @@ except ImportError:
     sys.exit(1)
 
 
-def _set_font_family(elem: ET.Element, family: str, weight: int | None = None):
+def _set_font_family(elem: Element, family: str, weight: int | None = None):
     """Update font-family/inkscape spec on an element.
 
     Optionally also updates font-weight/variations.
@@ -1165,9 +1170,9 @@ class FontCache:
                     # Allow subset match - RELAXED:
                     # Do not abort, use the best match we found
                     print(
-                        f"Loaded font '{font_path.name}' but family "
-                        f"mismatch ({fam_candidate}) for requested "
-                        f"'{font_family}'. Using it anyway."
+                        f"Loaded font '{font_path.name}' but family mismatch "
+                        f"({fam_candidate}) for requested '{font_family}'. "
+                        "Using it anyway."
                     )
 
                 self._fonts[cache_key] = (ttfont, font_blob, font_index)
@@ -1263,7 +1268,7 @@ def _parse_num_list(val: str) -> list[float]:
 
 
 def text_to_path_rust_style(
-    text_elem: ET.Element,
+    text_elem: Element,
     font_cache: FontCache,
     path_obj: Path | None = None,
     path_start_offset: float = 0.0,
@@ -1272,7 +1277,7 @@ def text_to_path_rust_style(
     dy_list: list[float] | None = None,
     trim_trailing_spacing: bool = True,
     input_svg_path: Path | None = None,
-) -> tuple[ET.Element, float] | None:
+) -> tuple[Element, float] | None:
     import sys
 
     """
@@ -1547,13 +1552,14 @@ def text_to_path_rust_style(
     if "No javascript" in text_content or text_elem.get("id") in ["text8", "text54"]:
         dbg(
             f"DEBUG FONT ARGS for {text_elem.get('id')}: "
-            f"family='{font_family}' weight={font_weight} style='{font_style}' "
-            f"stretch='{font_stretch}' inkscape_spec='{inkscape_spec}'"
+            f"family='{font_family}' weight={font_weight} "
+            f"style='{font_style}' stretch='{font_stretch}' "
+            f"inkscape_spec='{inkscape_spec}'"
         )
     dbg(
-        f"DEBUG RUN: '{text_content[:40]}' font={font_family} size={font_size} "
-        f"w={font_weight} style={font_style} stretch={font_stretch} "
-        f"inkscape_spec={inkscape_spec}"
+        f"DEBUG RUN: '{text_content[:40]}' font={font_family} "
+        f"size={font_size} w={font_weight} style={font_style} "
+        f"stretch={font_stretch} inkscape_spec={inkscape_spec}"
     )
 
     # 3. Load font using CSS properties (fontconfig matches like browsers do)
@@ -1792,8 +1798,8 @@ def text_to_path_rust_style(
         sample_keys = list(cmap.keys())[:5] if cmap else []
         has_f04e = 0xF04E in cmap
         dbg(
-            f"DEBUG symbol cmap: len={len(cmap)} sample_keys={sample_keys} "
-            f"has_F04E={has_f04e}"
+            f"DEBUG symbol cmap: len={len(cmap)} "
+            f"sample_keys={sample_keys} has_F04E={has_f04e}"
         )
     try:
         # Pass variation settings to getGlyphSet for correct variable font
@@ -2762,8 +2768,8 @@ def text_to_path_rust_style(
                 font_weight,
                 font_style,
                 font_stretch,
-                f"Glyphs missing for chars '{uniq}' in font "
-                f"'{font_family}' and fallback",
+                f"Glyphs missing for chars '{uniq}' "
+                f"in font '{font_family}' and fallback",
             )
 
     # If primary is a symbol font, force primary to an outline-capable
@@ -3181,8 +3187,8 @@ def text_to_path_rust_style(
                 seg_cmap = cmap
                 if "text4" in str(text_elem.get("id")) or "兛" in text_content:
                     dbg(
-                        f"DEBUG text4: Using PRIMARY font. Scale={scale}, "
-                        f"UnitsPerEm={units_per_em}"
+                        f"DEBUG text4: Using PRIMARY font. "
+                        f"Scale={scale}, UnitsPerEm={units_per_em}"
                     )
             elif font_key == "cjk":
                 seg_ttfont = cjk_ttfont
@@ -3612,7 +3618,8 @@ def text_to_path_rust_style(
                 )
                 if DEBUG_ENABLED and has_arabic_debug and char_idx == 4:
                     print(
-                        f"DEBUG GLYPH[{char_idx}]: char='{text_content[char_idx]}' "
+                        f"DEBUG GLYPH[{char_idx}]: "
+                        f"char='{text_content[char_idx]}' "
                         f"dx={current_dx:.2f} adv={adv:.2f} "
                         f"chunk_origin={chunk_origin:.2f} "
                         f"chunk_cursor={chunk_cursor:.2f} "
@@ -3645,8 +3652,8 @@ def text_to_path_rust_style(
                     )
                     dbg(
                         f"    DEBUG_GLYPH: char='{char_val}' cp={cp_val} "
-                        f"gid={glyph_id} name={glyph_name} "
-                        f"has_path={has_path} cluster={cluster} idx={char_idx}"
+                        f"gid={glyph_id} name={glyph_name} has_path={has_path} "
+                        f"cluster={cluster} idx={char_idx}"
                     )
 
                     if "兛" in text_content:
@@ -4008,7 +4015,7 @@ def text_to_path_rust_style(
         return None
 
     # 8. Create path element with SVG namespace
-    path_elem = ET.Element("{http://www.w3.org/2000/svg}path")
+    path_elem = Element("{http://www.w3.org/2000/svg}path")
 
     # Copy presentation attributes from the source element
     # This ensures fill, stroke, etc. are preserved
@@ -4368,9 +4375,7 @@ def convert_svg_text_to_paths(
     print(f"Converting text to paths (Rust-style) in: {svg_path}")
 
     # 1. Parse SVG
-    ET.register_namespace(
-        "", "http://www.w3.org/2000/svg"
-    )  # Default namespace, no prefix
+    register_namespace("", "http://www.w3.org/2000/svg")  # Default namespace, no prefix
 
     tree = ET.parse(svg_path)
     root = tree.getroot()
@@ -4515,7 +4520,7 @@ def convert_svg_text_to_paths(
             # Handle multi-tspan text elements (or single textPath with tspans)
             if tspans:
                 # Create a group to hold multiple paths
-                group_elem = ET.Element("{http://www.w3.org/2000/svg}g")
+                group_elem = Element("{http://www.w3.org/2000/svg}g")
                 group_elem.set("id", elem_id + "_group")
 
                 # Copy transform from text to group if it exists
@@ -4568,7 +4573,7 @@ def convert_svg_text_to_paths(
                 temp_id_counter = 0
 
                 def _set_path_id(
-                    path_elem: ET.Element,
+                    path_elem: Element,
                     preferred_id: str | None,
                     elem_id: str = elem_id,
                 ) -> None:
@@ -4616,7 +4621,7 @@ def convert_svg_text_to_paths(
                 if not parent_anchor:
                     parent_anchor = "start"
 
-                def _is_tspan(elem: ET.Element) -> bool:
+                def _is_tspan(elem: Element) -> bool:
                     tag = elem.tag
                     if "}" in tag:
                         tag = tag.split("}", 1)[1]
@@ -4770,7 +4775,7 @@ def convert_svg_text_to_paths(
                                 f"effective_anchor={effective_anchor}"
                             )
 
-                        temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                        temp_text = Element("{http://www.w3.org/2000/svg}text")
                         temp_text.set("x", str(line_x))
                         temp_text.set("y", str(line_y))
                         # Chrome behavior: when ALL children have the same text-anchor
@@ -4802,7 +4807,8 @@ def convert_svg_text_to_paths(
                                 (i, v) for i, v in enumerate(dx_list_line) if v != 0.0
                             ]
                             print(
-                                f"DEBUG FLATTEN CALL: line_text='{line_text[:30]}...' "
+                                f"DEBUG FLATTEN CALL: "
+                                f"line_text='{line_text[:30]}...' "
                                 f"anchor={effective_anchor} "
                                 f"direction={text_elem.get('direction')} "
                                 f"dx_len={len(dx_list_line)}"
@@ -4833,12 +4839,11 @@ def convert_svg_text_to_paths(
                         parent.insert(idx, group_elem)
                         converted += 1
                         print(
-                            f"    Converted successfully "
-                            f"({tspan_converted} leaf span(s))"
+                            f"    Converted ({tspan_converted} spans)"
                         )
                         continue
 
-                def span_anchor(span: ET.Element, fallback: str) -> str:
+                def span_anchor(span: Element, fallback: str) -> str:
                     anchor = span.get("text-anchor", None)
                     if not anchor:
                         style_anchor_match = re.search(
@@ -4859,18 +4864,18 @@ def convert_svg_text_to_paths(
                     return anchor or fallback
 
                 def process_span(
-                    span: ET.Element,
+                    span: Element,
                     cx: float,
                     cy: float,
                     p_offset: float,
                     inherited_style: str,
-                    text_elem: ET.Element = text_elem,
+                    text_elem: Element = text_elem,
                     parent_anchor: str = parent_anchor,
                     dx_items: list = dx_items,
                     leaf_items: list = leaf_items,
                     elem_id: str = elem_id,
                     path_obj: Any = path_obj,
-                    group_elem: ET.Element = group_elem,
+                    group_elem: Element = group_elem,
                 ) -> tuple[float, float, float, int]:
                     nonlocal temp_id_counter, tspan_converted
 
@@ -4917,9 +4922,7 @@ def convert_svg_text_to_paths(
                             )
 
                             # Measure width to update cursor for following siblings
-                            temp_measure = ET.Element(
-                                "{http://www.w3.org/2000/svg}text"
-                            )
+                            temp_measure = Element("{http://www.w3.org/2000/svg}text")
                             temp_measure.set("x", "0")
                             temp_measure.set("y", "0")
                             if span_style:
@@ -4990,9 +4993,7 @@ def convert_svg_text_to_paths(
                             # CRITICAL: Update cx after adding to leaf_items!
                             # Without this, subsequent dx tspans use wrong
                             # cursor position. Measure width for siblings.
-                            temp_measure = ET.Element(
-                                "{http://www.w3.org/2000/svg}text"
-                            )
+                            temp_measure = Element("{http://www.w3.org/2000/svg}text")
                             temp_measure.set("x", "0")
                             temp_measure.set("y", "0")
                             if span_style:
@@ -5027,7 +5028,7 @@ def convert_svg_text_to_paths(
                         # Handle tail text after child
                         if child.tail and child.tail.strip():
                             tail_text = child.tail
-                            temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                            temp_text = Element("{http://www.w3.org/2000/svg}text")
                             temp_text.set("x", str(cx))
                             temp_text.set("y", str(cy))
                             if span_style:
@@ -5098,7 +5099,7 @@ def convert_svg_text_to_paths(
                     current_width = 0.0
 
                     def measure_leaf(li):
-                        temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                        temp_text = Element("{http://www.w3.org/2000/svg}text")
                         temp_text.set("x", str(0))
                         temp_text.set("y", str(0))
                         if li["style"]:
@@ -5154,7 +5155,7 @@ def convert_svg_text_to_paths(
                                 continue
                             # translate path by line_x + cursor, line_y
                             # wrap p_elem in group with translate
-                            g = ET.Element("{http://www.w3.org/2000/svg}g")
+                            g = Element("{http://www.w3.org/2000/svg}g")
                             g.set("transform", f"translate({line_x + cursor},{line_y})")
                             g.append(p_elem)
                             g.set("id", f"{elem_id}_tspan{temp_id_counter}")
@@ -5172,7 +5173,7 @@ def convert_svg_text_to_paths(
                             li_x = li["x"]
                             li_y = li["y"]
                             li_anchor = li.get("anchor") or parent_anchor
-                            temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                            temp_text = Element("{http://www.w3.org/2000/svg}text")
                             temp_text.set("x", str(li_x))
                             temp_text.set("y", str(li_y))
                             if "transform" in text_elem.attrib:
@@ -5205,8 +5206,7 @@ def convert_svg_text_to_paths(
                             else:
                                 if elem_id == "text4":
                                     dbg(
-                                        "DEBUG text4: result_inner None in "
-                                        "line_single branch"
+                                        "DEBUG text4: result_inner=None (line_single)"
                                     )
                                 raise RuntimeError(
                                     f"Failed to convert span in element {elem_id}"
@@ -5236,7 +5236,7 @@ def convert_svg_text_to_paths(
                             # later when generating the final path.
                             measured: list[tuple[dict, float]] = []  # (leaf, width)
                             for li in line_items:
-                                temp_measure = ET.Element(
+                                temp_measure = Element(
                                     "{http://www.w3.org/2000/svg}text"
                                 )
                                 temp_measure.set("x", "0")
@@ -5275,9 +5275,7 @@ def convert_svg_text_to_paths(
 
                             cursor = 0.0
                             for li, width in measured:
-                                temp_text = ET.Element(
-                                    "{http://www.w3.org/2000/svg}text"
-                                )
+                                temp_text = Element("{http://www.w3.org/2000/svg}text")
                                 anchor_shift = 0.0
                                 leaf_anchor = li.get("anchor") or line_anchor
                                 if leaf_anchor != line_anchor:
@@ -5307,8 +5305,7 @@ def convert_svg_text_to_paths(
                                         f"DEBUG FINAL: id={elem_id} "
                                         f"anchor={line_anchor} "
                                         f"leaf_anchor={leaf_anchor} "
-                                        f"width={width} "
-                                        f"total_width={total_width} "
+                                        f"width={width} total_width={total_width} "
                                         f"parent_shift={parent_shift} "
                                         f"eff_shift={effective_parent_shift} "
                                         f"base_x={line_base_x} x={x_val}"
@@ -5359,8 +5356,7 @@ def convert_svg_text_to_paths(
                                 else:
                                     if elem_id == "text4":
                                         dbg(
-                                            "DEBUG text4: result_inner None "
-                                            "in measured branch"
+                                            "DEBUG text4: result_inner=None (measured)"
                                         )
                                     raise RuntimeError(
                                         f"Failed to convert span in element {elem_id}"
@@ -5387,7 +5383,7 @@ def convert_svg_text_to_paths(
                 # If textPath, we need to create a temp text element
                 # with the content from textPath
                 if text_path_elem is not None:
-                    temp_text = ET.Element("{http://www.w3.org/2000/svg}text")
+                    temp_text = Element("{http://www.w3.org/2000/svg}text")
                     # Copy attributes from text_elem
                     for k, v in text_elem.attrib.items():
                         temp_text.set(k, v)
@@ -5876,7 +5872,7 @@ def apply_visual_correction(input_path: Path, output_path: Path) -> None:
 
     # Collect IDs from input SVG
     try:
-        ET.register_namespace("", "http://www.w3.org/2000/svg")
+        register_namespace("", "http://www.w3.org/2000/svg")
         tree = ET.parse(input_path)
         root = tree.getroot()
         input_ids = []
@@ -5907,7 +5903,7 @@ def apply_visual_correction(input_path: Path, output_path: Path) -> None:
 
     # 3. Load output SVG to modify
     try:
-        ET.register_namespace("", "http://www.w3.org/2000/svg")
+        register_namespace("", "http://www.w3.org/2000/svg")
         tree = ET.parse(output_path)
         root = tree.getroot()
 
@@ -5966,9 +5962,12 @@ def main():
             "outlines using HarfBuzz shaping."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Examples:\n"
-        "  t2p_convert samples/test_text_to_path.svg\n"
-        "  t2p_convert samples/test_text_to_path.svg /tmp/out.svg --precision 6\n",
+        epilog=(
+            "Examples:\n"
+            "  t2p_convert samples/test_text_to_path.svg\n"
+            "  t2p_convert samples/test_text_to_path.svg /tmp/out.svg "
+            "--precision 6\n"
+        ),
     )
     parser.add_argument("input_svg", help="Input SVG file")
     parser.add_argument(
@@ -5981,8 +5980,8 @@ def main():
         type=int,
         default=28,
         help=(
-            "Decimal places for generated path coordinates "
-            "(use 6 to roughly match Inkscape path size)."
+            "Decimal places for path coordinates "
+            "(use 6 to match Inkscape path size)."
         ),
     )
     parser.add_argument(

@@ -13,9 +13,11 @@ Usage:
 import argparse
 import subprocess
 import tempfile
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as StdET
 from pathlib import Path
 from typing import Any
+
+import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
 
 from text2path.frame_comparer import ImageComparator, SVGRenderer
 
@@ -29,13 +31,15 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
     out_dir.mkdir(parents=True, exist_ok=True)
     tree = ET.parse(svg_path)
     root = tree.getroot()
+    if root is None:
+        raise SystemExit(f"Failed to parse SVG: {svg_path}")
 
     ns = {"svg": "http://www.w3.org/2000/svg"}
     text_el = root.find(f".//svg:text[@id='{text_id}']", ns)
     if text_el is None:
         raise SystemExit(f"text id '{text_id}' not found")
 
-    new_root = ET.Element(root.tag, root.attrib)
+    new_root = StdET.Element(root.tag, root.attrib)
     # copy defs (gradients, paths) that text may reference
     for child in root:
         tag = child.tag.split("}")[-1]
@@ -43,7 +47,7 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
             new_root.append(child)
 
     # copy referenced paths for textPath
-    def collect_paths(el: ET.Element, dst_root: ET.Element) -> None:
+    def collect_paths(el: StdET.Element, dst_root: StdET.Element) -> None:
         for ch in el:
             tag = ch.tag.split("}")[-1]
             if tag == "path" and ch.get("id"):
@@ -53,7 +57,7 @@ def extract_text(svg_path: Path, text_id: str, out_dir: Path) -> tuple[Path, Pat
     collect_paths(root, new_root)
 
     new_root.append(text_el)
-    new_tree = ET.ElementTree(new_root)
+    new_tree = StdET.ElementTree(new_root)
     extracted = out_dir / f"{text_id}_single.svg"
     new_tree.write(extracted, encoding="utf-8", xml_declaration=True)
     converted = out_dir / f"{text_id}_single_converted.svg"

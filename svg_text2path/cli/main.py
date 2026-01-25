@@ -12,6 +12,7 @@ from svg_text2path import __version__
 from svg_text2path.cli.commands.batch import batch
 from svg_text2path.cli.commands.compare import compare
 from svg_text2path.cli.commands.convert import convert
+from svg_text2path.cli.commands.deps import deps
 from svg_text2path.cli.commands.fonts import fonts
 from svg_text2path.config import Config
 
@@ -53,6 +54,7 @@ cli.add_command(convert)
 cli.add_command(batch)
 cli.add_command(fonts)
 cli.add_command(compare)
+cli.add_command(deps)
 
 
 def main() -> None:

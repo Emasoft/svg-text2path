@@ -24,13 +24,13 @@ from xml.etree.ElementTree import (
     register_namespace as _register_namespace,
 )
 
-from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-untyped]
+from fontTools.pens.recordingPen import RecordingPen
 from svg.path import parse_path
 
 from svg_text2path.config import Config
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.fonts.cache import FontCache, MissingFontError
-from svg_text2path.shaping.bidi import detect_base_direction, get_visual_runs
+from svg_text2path.shaping.bidi import BiDiRun, detect_base_direction, get_visual_runs
 from svg_text2path.shaping.harfbuzz import create_hb_font, shape_run
 from svg_text2path.svg.parser import (
     SVG_NS,
@@ -122,6 +122,9 @@ class Text2PathConverter:
 
         self._font_cache = font_cache
         self._path_map: dict[str, Any] = {}  # id -> svg.path.Path for textPath
+        self._hb_font_cache: dict[
+            tuple[int, int, float], Any
+        ] = {}  # HarfBuzz font cache
 
     @property
     def font_cache(self) -> FontCache:
@@ -406,29 +409,53 @@ class Text2PathConverter:
 
         # Get font from cache
         try:
-            tt_font, font_blob, face_idx = self.font_cache.get_font(
+            font_result = self.font_cache.get_font(
                 font_family, weight=weight, style=font_style
             )
+            if font_result is None:
+                # Font not found, return None to indicate conversion not possible
+                return None
+            tt_font, font_blob, face_idx = font_result
         except MissingFontError:
             raise
 
-        # Create HarfBuzz font
-        hb_font = create_hb_font(font_blob, face_idx, font_size)
+        # Create HarfBuzz font (with caching to avoid recreating for each text element)
+        cache_key = (id(font_blob), face_idx, font_size)
+        if cache_key not in self._hb_font_cache:
+            self._hb_font_cache[cache_key] = create_hb_font(
+                font_blob, face_idx, font_size
+            )
+        hb_font = self._hb_font_cache[cache_key]
 
         # Get font metrics for scaling
         units_per_em = tt_font["head"].unitsPerEm
         scale = font_size / units_per_em
 
-        # Detect text direction
-        base_direction = detect_base_direction(text_content)
-
-        # Get visual runs for BiDi
-        runs = get_visual_runs(text_content, base_direction)
+        # Skip BiDi processing for pure ASCII text (performance optimization)
+        if text_content.isascii():
+            # Pure ASCII - single LTR run, no BiDi processing needed
+            runs = [
+                BiDiRun(
+                    text=text_content,
+                    start=0,
+                    end=len(text_content),
+                    level=0,
+                    direction="ltr",
+                )
+            ]
+        else:
+            # Detect text direction for non-ASCII text
+            base_direction = detect_base_direction(text_content)
+            # Get visual runs for BiDi (handles RTL, mixed direction)
+            runs = get_visual_runs(text_content, base_direction)
 
         # Shape each run and collect glyphs
         all_paths: list[str] = []
         cursor_x = x
         cursor_y = y
+
+        # Pre-fetch glyph set once (performance optimization: O(1) instead of O(n))
+        glyph_set = tt_font.getGlyphSet()
 
         for run in runs:
             glyphs = shape_run(
@@ -444,7 +471,6 @@ class Text2PathConverter:
 
                 # Get glyph outline
                 glyph_name = tt_font.getGlyphName(glyph.glyph_id)
-                glyph_set = tt_font.getGlyphSet()
 
                 if glyph_name not in glyph_set:
                     cursor_x += glyph.x_advance * scale

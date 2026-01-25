@@ -10,7 +10,7 @@ import contextlib
 from dataclasses import dataclass
 from typing import Any
 
-import uharfbuzz as hb  # type: ignore[import-untyped]
+import uharfbuzz as hb
 
 
 @dataclass

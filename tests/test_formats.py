@@ -13,9 +13,13 @@ from pathlib import Path
 
 from svg_text2path.formats import (
     CSSHandler,
+    CSVHandler,
     FileHandler,
     HTMLHandler,
     InputFormat,
+    JSONHandler,
+    MarkdownHandler,
+    RemoteHandler,
     StringHandler,
     detect_format,
 )
@@ -58,7 +62,8 @@ class TestFileHandler:
         tree = handler.parse(svg_file)
 
         root = tree.getroot()
-        # Verify root is svg element
+        # Verify root is not None and is svg element
+        assert root is not None
         assert root.tag.endswith("svg") or root.tag == "svg"
         # Verify attributes preserved
         assert root.get("width") == "200"
@@ -78,6 +83,7 @@ class TestFileHandler:
         # Parse and verify content
         tree = handler.parse(svgz_file)
         root = tree.getroot()
+        assert root is not None
         assert root.get("width") == "200"
 
     def test_serialize_svg_file(self, tmp_path: Path) -> None:
@@ -128,6 +134,7 @@ class TestStringHandler:
         tree = handler.parse(SAMPLE_SVG)
 
         root = tree.getroot()
+        assert root is not None
         assert root.tag.endswith("svg") or root.tag == "svg"
         assert root.get("viewBox") == "0 0 200 100"
 
@@ -137,7 +144,8 @@ class TestStringHandler:
         tree = handler.parse(SAMPLE_SVG_SNIPPET)
 
         root = tree.getroot()
-        # Root should be svg element
+        # Root should be svg element (verify not None first)
+        assert root is not None
         assert root.tag.endswith("svg") or root.tag == "svg"
         # Should contain text element
         text_elem = root.find(".//{http://www.w3.org/2000/svg}text")
@@ -188,7 +196,10 @@ class TestHTMLHandler:
         handler = HTMLHandler()
 
         # SVG without XML declaration (more realistic in HTML context)
-        svg_in_html = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text>Test</text></svg>'
+        svg_in_html = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">'
+            "<text>Test</text></svg>"
+        )
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -254,7 +265,10 @@ class TestCSSHandler:
         # Properly URL-encoded SVG with XML-compatible quotes
         import urllib.parse
 
-        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>'
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+            '<circle cx="50" cy="50" r="40" fill="red"/></svg>'
+        )
         encoded = urllib.parse.quote(svg, safe="")
         data_uri = f"data:image/svg+xml,{encoded}"
 
@@ -272,7 +286,10 @@ class TestCSSHandler:
         handler = CSSHandler()
 
         # Create base64-encoded SVG
-        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect/></svg>'
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">'
+            "<rect/></svg>"
+        )
         b64 = base64.b64encode(svg.encode()).decode()
         data_uri = f"data:image/svg+xml;base64,{b64}"
 
@@ -389,3 +406,276 @@ class TestDetectFormat:
         elem = tree.getroot()
         result = detect_format(elem)
         assert result.format == InputFormat.ELEMENT_TREE
+
+
+# =============================================================================
+# Additional Handler Tests (10 new tests)
+# =============================================================================
+
+
+class TestMarkdownHandler:
+    """Test MarkdownHandler: detect and extract SVG from Markdown."""
+
+    def test_can_handle_valid_markdown_with_svg(self) -> None:
+        """MarkdownHandler identifies Markdown containing SVG with markdown markers."""
+        handler = MarkdownHandler()
+
+        # Markdown with fenced code block containing SVG
+        md_with_svg = """# SVG Example
+
+Here is an SVG diagram:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+  <circle cx="50" cy="50" r="40" fill="blue"/>
+</svg>
+```
+
+Some more text after.
+"""
+        assert handler.can_handle(md_with_svg) is True
+
+        # Markdown with inline SVG and list markers
+        md_inline_svg = """- Item one
+- Item two with SVG: <svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>
+"""
+        assert handler.can_handle(md_inline_svg) is True
+
+    def test_can_handle_invalid_input_no_svg(self) -> None:
+        """MarkdownHandler rejects Markdown without SVG content."""
+        handler = MarkdownHandler()
+
+        # Plain markdown without SVG
+        plain_md = """# Hello World
+
+This is a simple markdown document.
+
+- List item 1
+- List item 2
+
+[A link](https://example.com)
+"""
+        assert handler.can_handle(plain_md) is False
+
+        # Non-string input
+        assert handler.can_handle(12345) is False
+        assert handler.can_handle(None) is False
+        assert handler.can_handle({"key": "value"}) is False
+
+        # SVG without markdown markers
+        just_svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        assert handler.can_handle(just_svg) is False
+
+    def test_extract_all_svgs_multiple(self) -> None:
+        """MarkdownHandler.extract_all_svgs correctly extracts multiple SVGs."""
+        handler = MarkdownHandler()
+
+        md_with_multiple_svgs = """# Multiple SVGs
+
+## First SVG in code fence
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" id="first" width="50" height="50">
+  <rect x="10" y="10" width="30" height="30" fill="red"/>
+</svg>
+```
+
+## Second SVG inline
+
+Here is another: <svg xmlns="http://www.w3.org/2000/svg" id="second">
+<circle cx="50" cy="50" r="40"/></svg>
+
+## Third SVG in another fence
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" id="third" viewBox="0 0 200 200">
+  <polygon points="100,10 40,198 190,78 10,78 160,198"/>
+</svg>
+```
+"""
+        svgs = handler.extract_all_svgs(md_with_multiple_svgs)
+
+        assert len(svgs) == 3
+        # Fenced code blocks are extracted first, then inline SVGs
+        assert 'id="first"' in svgs[0]  # First code fence
+        assert 'id="third"' in svgs[1]  # Second code fence
+        assert 'id="second"' in svgs[2]  # Inline SVG (extracted after fences)
+
+
+class TestJSONHandler:
+    """Test JSONHandler: detect and extract SVG from JSON."""
+
+    def test_can_handle_valid_json_with_svg(self) -> None:
+        """JSONHandler identifies JSON containing SVG string values."""
+        handler = JSONHandler()
+
+        # Simple JSON object with SVG
+        json_with_svg = '{"icon": "<svg xmlns=\\"http://www.w3.org/2000/svg\\"><rect/></svg>"}'
+        assert handler.can_handle(json_with_svg) is True
+
+        # JSON array with SVG
+        json_array = '[{"name": "icon1", "svg": "<svg><circle/></svg>"}]'
+        assert handler.can_handle(json_array) is True
+
+        # Non-JSON should not be handled
+        assert handler.can_handle("not json at all") is False
+        assert handler.can_handle("<svg><rect/></svg>") is False
+
+    def test_find_svg_in_nested_dict(self) -> None:
+        """JSONHandler._find_svg_in_value finds SVG in deeply nested structures."""
+        handler = JSONHandler()
+
+        # Nested dict structure
+        nested_data = {
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "items": [
+                            {"name": "item1"},
+                            {
+                                "name": "item2",
+                                "content": (
+                                    '<svg xmlns="http://www.w3.org/2000/svg" '
+                                    'width="200" height="200">'
+                                    '<path d="M10 10 L 90 90"/></svg>'
+                                ),
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+
+        result = handler._find_svg_in_value(nested_data)
+
+        assert result is not None
+        assert "<svg" in result
+        assert 'width="200"' in result
+        assert "<path" in result
+
+
+class TestCSVHandler:
+    """Test CSVHandler: detect and extract SVG from CSV."""
+
+    def test_can_handle_valid_csv_with_svg(self) -> None:
+        """CSVHandler identifies CSV containing SVG in cells."""
+        handler = CSVHandler()
+
+        # CSV with SVG in a cell (line breaks allowed within cell for test)
+        csv_with_svg = (
+            "name,icon,description\n"
+            'logo,"<svg xmlns=""http://www.w3.org/2000/svg"">'
+            '<circle r=""14"" fill=""green""/></svg>",Company logo\n'
+        )
+        assert handler.can_handle(csv_with_svg) is True
+
+        # Tab-separated with SVG
+        tsv_with_svg = 'id\tsvg\n1\t<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        assert handler.can_handle(tsv_with_svg) is True
+
+        # CSV without SVG
+        plain_csv = "name,value\nfoo,bar\nbaz,qux"
+        assert handler.can_handle(plain_csv) is False
+
+
+class TestCSSHandlerAdditional:
+    """Additional tests for CSSHandler data URI decoding."""
+
+    def test_can_handle_valid_css_data_uri(self) -> None:
+        """CSSHandler identifies CSS with SVG data URI in various properties."""
+        handler = CSSHandler()
+
+        # background-image with data URI
+        css_bg = (
+            '.icon { background-image: '
+            'url("data:image/svg+xml,%3Csvg%3E%3C/svg%3E"); }'
+        )
+        assert handler.can_handle(css_bg) is True
+
+        # mask property with data URI
+        css_mask = (
+            '.masked { mask: '
+            'url("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="); }'
+        )
+        assert handler.can_handle(css_mask) is True
+
+        # Plain CSS without SVG data URI
+        plain_css = ".box { background: url('image.png'); color: red; }"
+        assert handler.can_handle(plain_css) is False
+
+    def test_decode_data_uri_base64_encoded_svg(self) -> None:
+        """CSSHandler._decode_data_uri correctly decodes base64 SVG."""
+        import base64
+
+        handler = CSSHandler()
+
+        # Create realistic SVG and encode it
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">'
+            '<path d="M12 2L2 22h20z" fill="#333"/></svg>'
+        )
+        b64_encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        data_uri = f"data:image/svg+xml;base64,{b64_encoded}"
+
+        result = handler._decode_data_uri(data_uri)
+
+        assert result is not None
+        assert result == svg
+        assert 'width="24"' in result
+        assert 'fill="#333"' in result
+
+    def test_decode_data_uri_url_encoded_svg(self) -> None:
+        """CSSHandler._decode_data_uri correctly decodes URL-encoded SVG."""
+        import urllib.parse
+
+        handler = CSSHandler()
+
+        # Create SVG and URL-encode it
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            '<text x="10" y="50">Hello</text></svg>'
+        )
+        url_encoded = urllib.parse.quote(svg, safe="")
+        data_uri = f"data:image/svg+xml,{url_encoded}"
+
+        result = handler._decode_data_uri(data_uri)
+
+        assert result is not None
+        assert result == svg
+        assert 'viewBox="0 0 100 100"' in result
+        assert "<text" in result
+
+
+class TestRemoteHandler:
+    """Test RemoteHandler: detect SVG URLs."""
+
+    def test_can_handle_valid_svg_url(self) -> None:
+        """RemoteHandler identifies URLs pointing to SVG resources."""
+        handler = RemoteHandler()
+
+        # Direct SVG file URL
+        assert handler.can_handle("https://example.com/icons/logo.svg") is True
+        assert handler.can_handle("http://cdn.example.org/assets/image.svg") is True
+
+        # Compressed SVG
+        assert handler.can_handle("https://example.com/compressed.svgz") is True
+
+        # URL with svg in query param
+        svg_query_url = "https://api.example.com/render?type=svg&id=123"
+        assert handler.can_handle(svg_query_url) is True
+
+        # URL with image/svg content type hint
+        svg_format_url = "https://example.com/get?format=image/svg+xml"
+        assert handler.can_handle(svg_format_url) is True
+
+        # Non-SVG URLs should not be handled
+        assert handler.can_handle("https://example.com/image.png") is False
+        assert handler.can_handle("https://example.com/page.html") is False
+
+        # Non-HTTP URLs should not be handled
+        assert handler.can_handle("ftp://example.com/file.svg") is False
+        assert handler.can_handle("/local/path/file.svg") is False
+
+        # Non-string input
+        assert handler.can_handle(12345) is False
+        assert handler.can_handle(None) is False

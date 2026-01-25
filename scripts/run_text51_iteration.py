@@ -5,7 +5,7 @@ Automate text51 iteration packaging with and without manual patches.
 Creates a timestamped iteration directory under samples/TEXT51_INVESTIGATION:
 ITERATION_XXXX_<timestamp>/
   SVG-PAIR-A/            # original + freshly converted
-  SVG-PAIR-B/            # original (unchanged) + patched converted (stroke-width, stroke color)
+  SVG-PAIR-B/            # original (unchanged) + patched converted
   COMPARISONS/
     SVG-PAIR-A-DIFF/     # png renders, diff png, json, html
     SVG-PAIR-B-DIFF/     # png renders, diff png, json, html
@@ -15,14 +15,12 @@ Requires: node, SVG-BBOX tools, text2path installed (this repo).
 
 from __future__ import annotations
 
-import json
 import os
-import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
-import tempfile
 from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +32,9 @@ THRESHOLD = "20"  # pixel threshold (20/256) to smooth AA diffs
 
 def _next_iteration_dir() -> Path:
     existing = sorted(
-        p for p in INVEST_DIR.iterdir() if p.is_dir() and p.name.startswith("ITERATION_")
+        p
+        for p in INVEST_DIR.iterdir()
+        if p.is_dir() and p.name.startswith("ITERATION_")
     )
     next_idx = 1
     if existing:
@@ -47,7 +47,9 @@ def _next_iteration_dir() -> Path:
     return INVEST_DIR / f"ITERATION_{next_idx:04d}_{ts}"
 
 
-def _run(cmd: list[str], cwd: Path | None = None, capture_json: Path | None = None) -> None:
+def _run(
+    cmd: list[str], cwd: Path | None = None, capture_json: Path | None = None
+) -> None:
     res = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
@@ -162,9 +164,9 @@ def _compare(svg1: Path, svg2: Path, out_dir: Path) -> None:
         stub = Path(tmpd) / "open"
         stub.write_text("#!/bin/sh\nexit 0\n")
         stub.chmod(0o755)
-        env = dict(**{"PATH": f"{tmpd}:{Path().cwd()}/venv/bin:{Path().cwd()}/bin:{Path().cwd()}"}, **{})
-        env.update(**{k: v for k, v in os.environ.items()})
-        env["PATH"] = f"{tmpd}:{env.get('PATH','')}"
+        cwd = Path().cwd()
+        env = dict(os.environ)
+        env["PATH"] = f"{tmpd}:{cwd}/venv/bin:{cwd}/bin:{cwd}:{env.get('PATH', '')}"
         subprocess.run(html_cmd, cwd=ROOT, env=env, check=True)
 
     # Move HTML report into the comparison folder if generated

@@ -9,7 +9,7 @@ from io import StringIO
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import register_namespace as _register_namespace
 
-import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
+import defusedxml.ElementTree as ET
 
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
