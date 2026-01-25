@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- Extremely small element (sub-pixel) -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <rect id="tiny-rect" x="100" y="100" width="0.001" height="0.001" fill="#e74c3c"/>
-</svg>

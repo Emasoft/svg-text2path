@@ -5958,6 +5958,8 @@ def main():
     """CLI entry for t2p_convert."""
     import argparse
 
+    from svg_text2path.cli.utils.banner import print_banner
+
     parser = argparse.ArgumentParser(
         prog="t2p_convert",
         description=(
@@ -6001,7 +6003,16 @@ def main():
         help="Directory for rotated log files (default: ./logs)",
         default=None,
     )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress banner and non-error output.",
+    )
     args = parser.parse_args()
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not args.quiet:
+        print_banner(force=True)
 
     setup_logging(debug=args.debug, log_dir=args.log_dir)
 

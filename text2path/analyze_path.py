@@ -46,13 +46,25 @@ def get_bbox(svg_path: Path) -> None:
 
 
 def main() -> None:
+    from svg_text2path.cli.utils.banner import print_banner
+
     parser = argparse.ArgumentParser(
         prog="t2p_analyze_path",
         description="Compute rough bounding box for first <path> in SVG.",
         epilog="Example: t2p_analyze_path samples/test_text_to_path_advanced.svg",
     )
     parser.add_argument("svg", type=Path, help="SVG file containing a <path>")
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress banner and non-error output.",
+    )
     args = parser.parse_args()
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not args.quiet:
+        print_banner(force=True)
+
     get_bbox(args.svg)
 
 

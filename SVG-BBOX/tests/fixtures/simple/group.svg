@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <g id="test-group" transform="translate(20, 20)">
-    <rect id="rect-in-group" x="30" y="30" width="60" height="40" fill="#9b59b6" />
-    <circle id="circle-in-group" cx="100" cy="80" r="25" fill="#f39c12" />
-  </g>
-</svg>

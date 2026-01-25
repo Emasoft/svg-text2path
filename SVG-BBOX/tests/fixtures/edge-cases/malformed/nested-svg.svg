@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- Nested SVG elements - valid but complex -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <svg id="inner-svg" x="25" y="25" width="150" height="150" viewBox="0 0 100 100">
-    <rect id="nested-rect" x="25" y="25" width="50" height="50" fill="#e74c3c"/>
-  </svg>
-</svg>

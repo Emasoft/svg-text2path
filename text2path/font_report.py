@@ -120,6 +120,8 @@ def main() -> None:
     """Main entry point for the font report CLI."""
     import argparse
 
+    from svg_text2path.cli.utils.banner import print_banner
+
     ap = argparse.ArgumentParser(
         prog="t2p_font_report",
         description=(
@@ -139,7 +141,16 @@ def main() -> None:
         default=Path("font_report.md"),
         help="Output markdown file (default: font_report.md)",
     )
+    ap.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress banner and non-error output.",
+    )
     args = ap.parse_args()
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not args.quiet:
+        print_banner(force=True)
     rows = collect(args.svg)
     lines: list[str] = []
     header = (

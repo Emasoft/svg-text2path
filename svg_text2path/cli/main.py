@@ -14,13 +14,14 @@ from svg_text2path.cli.commands.compare import compare
 from svg_text2path.cli.commands.convert import convert
 from svg_text2path.cli.commands.deps import deps
 from svg_text2path.cli.commands.fonts import fonts
+from svg_text2path.cli.utils.banner import print_banner
 from svg_text2path.config import Config
 
 console = Console()
 error_console = Console(stderr=True)
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(__version__, prog_name="text2path")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
@@ -33,6 +34,11 @@ def cli(
 ) -> None:
     """Convert SVG text elements to vector path outlines."""
     ctx.ensure_object(dict)
+    ctx.obj["quiet"] = quiet
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not quiet:
+        print_banner(console, force=True)
 
     # Set up logging level
     if quiet:
@@ -47,6 +53,10 @@ def cli(
         ctx.obj["config"] = Config.load(Path(config_path))
     else:
         ctx.obj["config"] = Config.load()
+
+    # Show help if no command given
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 # Add commands to CLI group

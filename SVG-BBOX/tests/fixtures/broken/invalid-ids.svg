@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
-  <!-- Invalid IDs for testing validation -->
-  <rect id="123-starts-with-digit" x="20" y="20" width="60" height="40" fill="#e67e22" />
-  <circle id="has spaces in id" cx="150" cy="100" r="30" fill="#e74c3c" />
-  <path id="has@special#chars!" d="M 200,50 L 250,100 L 200,150 Z" fill="#3498db" />
-</svg>

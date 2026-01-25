@@ -1,0 +1,14 @@
+{
+  "name": "svg-text2path-deps",
+  "version": "1.0.0",
+  "description": "JavaScript dependencies for svg-text2path visual comparison tools",
+  "scripts": {
+    "compare": "npx sbb-compare",
+    "bbox": "npx sbb-getbbox"
+  },
+  "author": "Emasoft",
+  "license": "MIT",
+  "dependencies": {
+    "svg-bbox": "^1.1.11"
+  }
+}

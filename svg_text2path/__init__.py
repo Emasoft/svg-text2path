@@ -32,7 +32,7 @@ from svg_text2path.tools.dependencies import (
     verify_all_dependencies,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 __author__ = "Emasoft"
 __email__ = "713559+Emasoft@users.noreply.github.com"
 

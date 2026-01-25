@@ -417,6 +417,8 @@ def format_comparison_result(diff_info: dict[str, Any]) -> str:
 
 
 def main() -> int:
+    from svg_text2path.cli.utils.banner import print_banner
+
     parser = argparse.ArgumentParser(
         description="Compare two SVG files visually with pixel-perfect diff output",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -461,8 +463,17 @@ def main() -> int:
         action="store_true",
         help="Generate HTML summary but do not auto-open it",
     )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress banner and non-error output.",
+    )
 
     args = parser.parse_args()
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not args.quiet:
+        print_banner(force=True)
 
     # Validate inputs
     if not args.svg1.exists():

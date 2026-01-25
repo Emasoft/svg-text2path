@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
-  <text id="nested-tspan" x="50" y="80" font-family="Arial, sans-serif" font-size="32">
-    <tspan fill="#2980b9">Normal</tspan>
-    <tspan fill="#e67e22" font-weight="bold" dx="5"> Bold</tspan>
-    <tspan fill="#27ae60" font-style="italic" dx="5"> Italic</tspan>
-    <tspan x="50" dy="40" font-size="24" fill="#8e44ad">Second line with different size</tspan>
-  </text>
-</svg>

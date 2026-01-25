@@ -25,9 +25,12 @@ __pycache__/
 htmlcov/
 coverage.xml
 
-# Node/Pnpm
+# Node/Bun/Pnpm
 node_modules/
 pnpm-lock.yaml
+bun.lockb
+bun.lock
+SVG-BBOX/
 
 # Generated logs
 logs/

@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
-  <path id="thick-stroke-path" d="M 50,150 L 250,150"
-        stroke="#e74c3c" stroke-width="50" stroke-linecap="round" fill="none" />
-</svg>

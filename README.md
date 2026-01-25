@@ -30,13 +30,29 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 
 ## Installation
 
-### From PyPI
+### CLI Tools (Recommended)
+
+Install the CLI tools globally with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-pip install svg-text2path
+uv tool install svg-text2path
+```
 
-# or with uv (recommended)
+This installs the `text2path` command in an isolated environment, available system-wide.
+
+### Python Library
+
+To use svg-text2path as a library in your Python project:
+
+```bash
+# With uv (recommended)
+uv pip install svg-text2path
+
+# Or add to your project dependencies
 uv add svg-text2path
+
+# With pip
+pip install svg-text2path
 ```
 
 ### Platform-Specific Notes
@@ -69,10 +85,21 @@ Fonts are loaded from `C:\Windows\Fonts` and the user font directory. For enhanc
 ```bash
 git clone https://github.com/Emasoft/svg-text2path.git
 cd svg-text2path
+
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Sync dependencies (creates venv and installs all deps)
 uv sync --all-extras
 
 # Run tests
 uv run pytest tests/ -v
+
+# Build package
+uv build
+
+# Publish to PyPI (requires PyPI token)
+uv publish
 ```
 
 ## Quick Start

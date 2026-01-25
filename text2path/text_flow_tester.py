@@ -93,6 +93,8 @@ def compare(
 
 
 def main() -> None:
+    from svg_text2path.cli.utils.banner import print_banner
+
     ap = argparse.ArgumentParser(
         prog="t2p_text_flow_test",
         description=(
@@ -113,7 +115,16 @@ def main() -> None:
         action="store_true",
         help="Only extract element; skip convert/compare",
     )
+    ap.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress banner and non-error output.",
+    )
     args = ap.parse_args()
+
+    # Print banner unless in quiet mode (force=True for CLI invocation)
+    if not args.quiet:
+        print_banner(force=True)
 
     workdir = args.work or Path(tempfile.mkdtemp(prefix="flowtest_"))
     workdir.mkdir(parents=True, exist_ok=True)
