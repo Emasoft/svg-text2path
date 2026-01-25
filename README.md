@@ -31,15 +31,33 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 - **Unicode BiDi** - RTL languages (Arabic, Hebrew) rendered correctly
 - **TextPath support** - Text along paths with tangent-based placement
 - **Strict font matching** - Fails on missing fonts (no silent fallbacks)
-- **20+ input formats** - File, string, HTML, CSS, JSON, markdown, remote URLs
+- **Multiple input formats** - SVG files, strings, SVGZ, HTML with embedded SVG, CSS data URIs, remote URLs
 - **Visual diff tools** - Pixel-perfect comparison via svg-bbox
 - **Cross-platform** - Works on macOS, Linux, and Windows
 
 ## Installation
 
-**Requires Python 3.11+** (Python 3.11 recommended for best compatibility)
+**Requires Python 3.11+** and **[uv](https://docs.astral.sh/uv/)** (fast Python package manager).
 
-Three installation methods depending on your use case:
+### Install uv
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or via Homebrew
+brew install uv
+
+# Or via pip (if you have Python)
+pip install uv
+```
+
+After installation, restart your terminal or run `source ~/.bashrc` (Linux) / `source ~/.zshrc` (macOS).
+
+Three methods depending on your use case:
 
 ### 1. CLI Tool (End Users)
 
