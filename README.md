@@ -31,7 +31,7 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 - **Unicode BiDi** - RTL languages (Arabic, Hebrew) rendered correctly
 - **TextPath support** - Text along paths with tangent-based placement
 - **Strict font matching** - Fails on missing fonts (no silent fallbacks)
-- **Multiple input formats** - SVG files, strings, SVGZ, HTML with embedded SVG, CSS data URIs, remote URLs
+- **Multiple input formats** - SVG files, SVG strings (API), ElementTree (API)
 - **Visual diff tools** - Pixel-perfect comparison via svg-bbox
 - **Cross-platform** - Works on macOS, Linux, and Windows
 
@@ -271,20 +271,6 @@ result = converter.convert_string(arabic_svg)
 # HarfBuzz handles proper glyph shaping and BiDi text direction
 ```
 
-### 5. Processing Remote SVGs
-
-```python
-from svg_text2path import Text2PathConverter
-
-converter = Text2PathConverter()
-
-# Fetch and convert remote SVG (with SSRF protection)
-result = converter.convert_url(
-    "https://example.com/diagram.svg",
-    "local_output.svg"
-)
-```
-
 ## Configuration
 
 ### YAML Config File
@@ -338,7 +324,6 @@ converter = Text2PathConverter(
 result = converter.convert_file(input_path, output_path)
 result = converter.convert_string(svg_content)
 element = converter.convert_element(text_element)
-result = converter.convert_url(url, output_path)
 ```
 
 ### ConversionResult
@@ -378,16 +363,12 @@ font, data, face_idx = cache.get_font(
 
 ## Supported Input Formats
 
-| Format | Detection | Example |
+| Format | Interface | Example |
 |--------|-----------|---------|
-| SVG file | `.svg` extension | `input.svg` |
-| SVGZ (compressed) | `.svgz` or gzip magic | `input.svgz` |
-| SVG string | Starts with `<svg` or `<text` | `"<svg>...</svg>"` |
-| ElementTree | `isinstance(x, Element)` | `ET.parse("file.svg")` |
-| HTML with SVG | Contains `<svg` tag | `"<html>...<svg>...</svg></html>"` |
-| CSS data URI | `url("data:image/svg+xml` | CSS background image |
-| Inkscape SVG | sodipodi namespace | Inkscape-exported files |
-| Remote URL | `http://` or `https://` | `"https://example.com/file.svg"` |
+| SVG file | CLI + API | `text2path convert input.svg` |
+| SVG string | API only | `converter.convert_string("<svg>...</svg>")` |
+| ElementTree | API only | `converter.convert_tree(ET.parse("file.svg"))` |
+| Inkscape SVG | CLI + API | Works with sodipodi namespace files |
 
 ## Troubleshooting
 
