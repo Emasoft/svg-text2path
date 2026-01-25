@@ -18,6 +18,13 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 
 **svg-text2path** solves this by converting text to vector paths that render identically on any system, without requiring fonts.
 
+### Before & After
+
+| Before (text elements) | After (vector paths) |
+|:----------------------:|:--------------------:|
+| ![Before](assets/example_before.svg) | ![After](assets/example_after.svg) |
+| *Requires fonts on viewer's system* | *Renders identically everywhere* |
+
 ## Features
 
 - **HarfBuzz text shaping** - Proper ligatures, kerning, and complex script support
