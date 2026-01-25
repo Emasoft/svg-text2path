@@ -21,7 +21,19 @@ console = Console()
 error_console = Console(stderr=True)
 
 
-@click.group(invoke_without_command=True)
+class BannerGroup(click.Group):
+    """Custom Click group that prints banner before help."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        """Print banner before help text (unless --quiet)."""
+        # Check argv directly since ctx.params not populated when help triggers
+        quiet = "-q" in sys.argv or "--quiet" in sys.argv
+        if not quiet:
+            print_banner(console, force=True)
+        super().format_help(ctx, formatter)
+
+
+@click.group(cls=BannerGroup, invoke_without_command=True)
 @click.version_option(__version__, prog_name="text2path")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
@@ -36,8 +48,8 @@ def cli(
     ctx.ensure_object(dict)
     ctx.obj["quiet"] = quiet
 
-    # Print banner unless in quiet mode (force=True for CLI invocation)
-    if not quiet:
+    # Print banner unless quiet mode or help will be shown (format_help handles help)
+    if not quiet and not ctx.resilient_parsing and ctx.invoked_subcommand is not None:
         print_banner(console, force=True)
 
     # Set up logging level
