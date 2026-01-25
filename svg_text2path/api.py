@@ -473,7 +473,8 @@ class Text2PathConverter:
                 glyph_name = tt_font.getGlyphName(glyph.glyph_id)
 
                 if glyph_name not in glyph_set:
-                    cursor_x += glyph.x_advance * scale
+                    # HarfBuzz advances are already in pixels (font scaled, positions /64)
+                    cursor_x += glyph.x_advance
                     continue
 
                 # Record glyph outline
@@ -482,22 +483,24 @@ class Text2PathConverter:
 
                 if pen.value:
                     # Transform and position glyph
-                    glyph_x = cursor_x + glyph.x_offset * scale
-                    glyph_y = cursor_y - glyph.y_offset * scale  # SVG y is inverted
+                    # HarfBuzz offsets are already in pixels (font scaled, positions /64)
+                    glyph_x = cursor_x + glyph.x_offset
+                    glyph_y = cursor_y - glyph.y_offset  # SVG y is inverted
 
                     path_d = self._transform_glyph(
                         pen.value,
                         glyph_x,
                         glyph_y,
-                        scale,
+                        scale,  # Glyph outlines need scaling (font units → pixels)
                         -scale,  # Flip Y
                     )
 
                     if path_d:
                         all_paths.append(path_d)
 
-                cursor_x += glyph.x_advance * scale
-                cursor_y += glyph.y_advance * scale
+                # HarfBuzz advances are already in pixels (font scaled, positions /64)
+                cursor_x += glyph.x_advance
+                cursor_y += glyph.y_advance
 
         if not all_paths:
             return None
