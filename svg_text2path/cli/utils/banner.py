@@ -46,10 +46,8 @@ def print_banner(console: Console | None = None, force: bool = False) -> None:
     console.print(Text(LOGO, style="cyan"))
 
     # Print version and GitHub link (centered for 68-char logo)
-    console.print(
-        f"         [bold]v{__version__}[/bold]  •  [link={GITHUB_URL}]{GITHUB_URL}[/link]",
-        highlight=False,
-    )
+    version_line = f"         [bold]v{__version__}[/bold]  •  [link={GITHUB_URL}]{GITHUB_URL}[/link]"  # noqa: E501
+    console.print(version_line, highlight=False)
     console.print()  # Empty line after banner
 
 
