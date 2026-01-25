@@ -1,6 +1,6 @@
 [project]
 name = "svg-text2path"
-version = "0.3.5"
+version = "0.4.0"
 description = "Convert SVG text elements to path outlines with HarfBuzz shaping"
 readme = "README.md"
 license = { text = "MIT" }
@@ -44,12 +44,6 @@ dev = [
 
 [project.scripts]
 text2path = "svg_text2path.cli.main:main"
-t2p_convert = "text2path.main:main"
-t2p_compare = "text2path.frame_comparer:main"
-t2p_font_report = "text2path.font_report:main"
-t2p_font_report_html = "text2path.font_report_html:main"
-t2p_analyze_path = "text2path.analyze_path:main"
-t2p_text_flow_test = "text2path.text_flow_tester:main"
 
 [project.urls]
 Homepage = "https://github.com/Emasoft/svg-text2path"
@@ -63,12 +57,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["svg_text2path", "text2path"]
+packages = ["svg_text2path"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "svg_text2path/**",
-    "text2path/**",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -100,7 +93,6 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 
 [tool.pyright]
 include = ["svg_text2path", "examples"]
-exclude = ["text2path"]  # Legacy package - being deprecated
 reportMissingTypeStubs = false
 pythonVersion = "3.11"
 
