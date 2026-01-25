@@ -30,30 +30,56 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 
 ## Installation
 
-### CLI Tools (Recommended)
+Three installation methods depending on your use case:
 
-Install the CLI tools globally with [uv](https://docs.astral.sh/uv/):
+### 1. CLI Tool (End Users)
+
+Install the `text2path` command globally in an isolated environment:
 
 ```bash
+# Install
 uv tool install svg-text2path
+
+# Upgrade to latest version
+uv tool install svg-text2path --upgrade
+
+# Uninstall
+uv tool uninstall svg-text2path
 ```
 
-This installs the `text2path` command in an isolated environment, available system-wide.
+The command is available system-wide without activating any virtual environment.
 
-### Python Library
+### 2. Library Dependency (Your Project)
 
-To use svg-text2path as a library in your Python project:
+Add svg-text2path as a dependency in your Python project:
 
 ```bash
-# With uv (recommended)
-uv pip install svg-text2path
-
-# Or add to your project dependencies
+# Install (adds to pyproject.toml)
 uv add svg-text2path
 
-# With pip
-pip install svg-text2path
+# Uninstall (removes from pyproject.toml)
+uv remove svg-text2path
 ```
+
+Use this when you want to import `svg_text2path` in your code.
+
+### 3. Direct Install (Virtual Environment)
+
+Install directly into the current virtual environment:
+
+```bash
+# Install
+uv pip install svg-text2path
+
+# Uninstall
+uv pip uninstall svg-text2path
+
+# Or with pip
+pip install svg-text2path
+pip uninstall svg-text2path
+```
+
+Use this for quick testing or scripts without a `pyproject.toml`.
 
 ### Platform-Specific Notes
 
