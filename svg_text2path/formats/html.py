@@ -72,15 +72,15 @@ class HTMLHandler(FormatHandler):
 
         # If single SVG, return it directly
         if len(svg_elements) == 1:
-            return cast(ElementTree, ET.ElementTree(svg_elements[0]))  # type: ignore[reportAttributeAccessIssue]
+            return cast(ElementTree, ET.ElementTree(svg_elements[0]))
 
         # Multiple SVGs - wrap in container
-        container = cast(Element, ET.Element("{http://www.w3.org/2000/svg}svg"))  # type: ignore[reportAttributeAccessIssue]
+        container = cast(Element, ET.Element("{http://www.w3.org/2000/svg}svg"))
         container.set("xmlns", "http://www.w3.org/2000/svg")
         for svg in svg_elements:
             container.append(svg)
 
-        return cast(ElementTree, ET.ElementTree(container))  # type: ignore[reportAttributeAccessIssue]
+        return cast(ElementTree, ET.ElementTree(container))
 
     def parse_element(self, source: str) -> Element:
         """Parse HTML and return first SVG element.

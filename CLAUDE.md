@@ -42,8 +42,8 @@ uv run text2path fonts find "Noto Sans"
 uv run text2path fonts report input.svg --detailed
 
 # Dependency checking
-uv run text2path deps check
-uv run text2path deps install svg-bbox
+uv run text2path deps
+# Note: svg-bbox is installed via npm separately (npm install svg-bbox)
 ```
 
 ### Batch Processing
@@ -136,10 +136,35 @@ export T2P_FONT_CACHE=/path/to/font_cache.json
 ### Logging
 Debug logging can be enabled via CLI:
 ```bash
-text2path --log-level DEBUG convert input.svg -o output.svg
+text2path -v convert input.svg -o output.svg
 ```
 
 Or programmatically via the `log_level` parameter on `Text2PathConverter`.
+
+### Security Configuration
+File size limits protect against decompression bombs. Configure via:
+
+**CLI flag:**
+```bash
+text2path convert large_file.svgz -o out.svg --no-size-limit
+```
+
+**Environment variables:**
+```bash
+export TEXT2PATH_IGNORE_SIZE_LIMITS=true     # Bypass all limits
+export TEXT2PATH_MAX_FILE_SIZE_MB=100        # Custom file size limit
+export TEXT2PATH_MAX_DECOMPRESSED_SIZE_MB=200  # Custom decompressed limit
+```
+
+**YAML config (`~/.text2path/config.yaml`):**
+```yaml
+security:
+  ignore_size_limits: false
+  max_file_size_mb: 50
+  max_decompressed_size_mb: 100
+```
+
+Defaults: max 50MB file size, max 100MB decompressed size.
 
 ## Project Structure
 ```

@@ -15,23 +15,41 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from xml.etree.ElementTree import ElementTree
 
+    from svg_text2path.config import Config
+
 
 class InputFormat(Enum):
     """Supported input format types."""
 
+    # Core SVG formats
     FILE_PATH = auto()  # Path to .svg file
     SVG_STRING = auto()  # Raw SVG string
     SVG_SNIPPET = auto()  # Partial SVG (no xml declaration)
+    ZSVG = auto()  # Gzip-compressed SVG (.svgz)
+    INKSCAPE = auto()  # Inkscape .svg with sodipodi namespace
+
+    # Tree objects
     ELEMENT_TREE = auto()  # xml.etree.ElementTree
     LXML_TREE = auto()  # lxml.etree tree
     BEAUTIFULSOUP = auto()  # BeautifulSoup Tag
+
+    # Embedded/escaped formats
     HTML_EMBEDDED = auto()  # SVG embedded in HTML
-    CSS_EMBEDDED = auto()  # SVG in CSS (background-image)
+    CSS_EMBEDDED = auto()  # SVG in CSS (background-image data URIs)
     JSON_ESCAPED = auto()  # SVG string escaped in JSON
     CSV_ESCAPED = auto()  # SVG in CSV cell
-    MARKDOWN = auto()  # SVG in Markdown
-    INKSCAPE = auto()  # Inkscape .svg with sodipodi namespace
-    ZSVG = auto()  # Gzip-compressed SVG
+    MARKDOWN = auto()  # SVG in Markdown fenced blocks
+
+    # Remote/URI formats
+    REMOTE_URL = auto()  # HTTP/HTTPS URL to SVG resource
+    DATA_URI = auto()  # data:image/svg+xml;base64,... string
+
+    # Code formats (SVG in source code strings)
+    PYTHON_CODE = auto()  # Python file with SVG in strings
+    JAVASCRIPT_CODE = auto()  # JS/TS file with SVG in template literals
+    RST = auto()  # reStructuredText with raw:: html directives
+    PLAINTEXT = auto()  # Plain text file (may contain data URIs)
+    EPUB = auto()  # ePub ebook with XHTML containing SVG
 
 
 @dataclass
@@ -49,6 +67,20 @@ class FormatHandler(ABC):
     Subclasses implement handling for specific input formats
     (file, string, tree, embedded, etc.).
     """
+
+    def __init__(self) -> None:
+        """Initialize handler with optional config."""
+        self._config: Config | None = None
+
+    @property
+    def config(self) -> Config | None:
+        """Get the configuration object."""
+        return self._config
+
+    @config.setter
+    def config(self, value: Config | None) -> None:
+        """Set the configuration object."""
+        self._config = value
 
     @property
     @abstractmethod
@@ -218,6 +250,31 @@ def _detect_file_format(path: Path) -> FormatDetectionResult:
             format=InputFormat.MARKDOWN, confidence=0.7, metadata=metadata
         )
 
+    if suffix == ".py":
+        return FormatDetectionResult(
+            format=InputFormat.PYTHON_CODE, confidence=0.7, metadata=metadata
+        )
+
+    if suffix in (".js", ".ts", ".jsx", ".tsx"):
+        return FormatDetectionResult(
+            format=InputFormat.JAVASCRIPT_CODE, confidence=0.7, metadata=metadata
+        )
+
+    if suffix == ".rst":
+        return FormatDetectionResult(
+            format=InputFormat.RST, confidence=0.7, metadata=metadata
+        )
+
+    if suffix == ".txt":
+        return FormatDetectionResult(
+            format=InputFormat.PLAINTEXT, confidence=0.5, metadata=metadata
+        )
+
+    if suffix == ".epub":
+        return FormatDetectionResult(
+            format=InputFormat.EPUB, confidence=0.9, metadata=metadata
+        )
+
     # Default to file path
     return FormatDetectionResult(
         format=InputFormat.FILE_PATH, confidence=0.5, metadata=metadata
@@ -227,7 +284,20 @@ def _detect_file_format(path: Path) -> FormatDetectionResult:
 def _detect_string_format(content: str) -> FormatDetectionResult:
     """Detect format of string content."""
     metadata: dict[str, Any] = {}
-    content_lower = content.strip().lower()
+    content_stripped = content.strip()
+    content_lower = content_stripped.lower()
+
+    # Check for remote URL first
+    if content_lower.startswith("http://") or content_lower.startswith("https://"):
+        return FormatDetectionResult(
+            format=InputFormat.REMOTE_URL, confidence=1.0, metadata=metadata
+        )
+
+    # Check for data URI
+    if content_lower.startswith("data:image/svg+xml"):
+        return FormatDetectionResult(
+            format=InputFormat.DATA_URI, confidence=1.0, metadata=metadata
+        )
 
     # Check for gzip magic bytes (base64 encoded or raw)
     if content.startswith("\x1f\x8b"):

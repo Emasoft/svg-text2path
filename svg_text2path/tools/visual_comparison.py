@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
+import defusedxml.ElementTree as ET
 import numpy as np
 from PIL import Image
 

@@ -28,8 +28,8 @@ from fontTools.pens.recordingPen import RecordingPen
 from svg.path import parse_path
 
 from svg_text2path.config import Config
-from svg_text2path.exceptions import SVGParseError
-from svg_text2path.fonts.cache import FontCache, MissingFontError
+from svg_text2path.exceptions import FontNotFoundError, SVGParseError
+from svg_text2path.fonts.cache import FontCache
 from svg_text2path.shaping.bidi import BiDiRun, detect_base_direction, get_visual_runs
 from svg_text2path.shaping.harfbuzz import create_hb_font, shape_run
 from svg_text2path.svg.parser import (
@@ -323,9 +323,9 @@ class Text2PathConverter:
                     parent.remove(text_elem)
                     parent.insert(idx, converted)
                     result.path_count += 1
-            except MissingFontError as e:
-                result.warnings.append(f"Missing font: {e.family}")
-                result.missing_fonts.append(f"{e.family} (weight={e.weight})")
+            except FontNotFoundError as e:
+                result.warnings.append(f"Missing font: {e.font_family}")
+                result.missing_fonts.append(f"{e.font_family} (weight={e.weight})")
             except Exception as e:
                 elem_id = text_elem.get("id", "unknown")
                 result.warnings.append(f"Failed to convert {elem_id}: {e}")
@@ -416,7 +416,7 @@ class Text2PathConverter:
                 # Font not found, return None to indicate conversion not possible
                 return None
             tt_font, font_blob, face_idx = font_result
-        except MissingFontError:
+        except FontNotFoundError:
             raise
 
         # Create HarfBuzz font (with caching to avoid recreating for each text element)
@@ -428,7 +428,7 @@ class Text2PathConverter:
         hb_font = self._hb_font_cache[cache_key]
 
         # Get font metrics for scaling
-        units_per_em = tt_font["head"].unitsPerEm  # type: ignore[reportAttributeAccessIssue]
+        units_per_em = tt_font["head"].unitsPerEm
         scale = font_size / units_per_em
 
         # Skip BiDi processing for pure ASCII text (performance optimization)

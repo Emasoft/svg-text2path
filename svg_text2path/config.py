@@ -49,11 +49,33 @@ class ConversionConfig:
 
 
 @dataclass
+class SecurityConfig:
+    """Security and resource limit settings."""
+
+    ignore_size_limits: bool = False
+    """Bypass file size limits for processing large files.
+
+    WARNING: Disabling size limits may expose the system to:
+    - Memory exhaustion from decompression bombs (gzip, ZIP)
+    - Denial of service from extremely large files
+
+    Only enable when processing trusted files that exceed default limits.
+    """
+
+    max_file_size_mb: int = 50
+    """Maximum file size in megabytes (default: 50MB)."""
+
+    max_decompressed_size_mb: int = 100
+    """Maximum decompressed size for gzip/ZIP files in megabytes (default: 100MB)."""
+
+
+@dataclass
 class Config:
     """Main configuration class for svg-text2path."""
 
     fonts: FontConfig = field(default_factory=FontConfig)
     conversion: ConversionConfig = field(default_factory=ConversionConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
     log_level: str = "WARNING"
     cache_dir: Path = field(
         default_factory=lambda: Path.home() / ".text2path" / "cache"
@@ -133,6 +155,18 @@ class Config:
             if "output_suffix" in defaults:
                 self.conversion.output_suffix = defaults["output_suffix"]
 
+        # Security
+        if "security" in data:
+            security = data["security"]
+            if "ignore_size_limits" in security:
+                self.security.ignore_size_limits = security["ignore_size_limits"]
+            if "max_file_size_mb" in security:
+                self.security.max_file_size_mb = security["max_file_size_mb"]
+            if "max_decompressed_size_mb" in security:
+                self.security.max_decompressed_size_mb = security[
+                    "max_decompressed_size_mb"
+                ]
+
         # General
         if "log_level" in data:
             self.log_level = data["log_level"]
@@ -149,6 +183,12 @@ class Config:
             "TEXT2PATH_OUTPUT_SUFFIX": (self.conversion, "output_suffix"),
             "TEXT2PATH_SYSTEM_FONTS_ONLY": (self.fonts, "system_only"),
             "TEXT2PATH_REMOTE_FONTS": (self.fonts, "remote"),
+            "TEXT2PATH_IGNORE_SIZE_LIMITS": (self.security, "ignore_size_limits"),
+            "TEXT2PATH_MAX_FILE_SIZE_MB": (self.security, "max_file_size_mb"),
+            "TEXT2PATH_MAX_DECOMPRESSED_SIZE_MB": (
+                self.security,
+                "max_decompressed_size_mb",
+            ),
             "TEXT2PATH_LOG_LEVEL": (self, "log_level"),
             "TEXT2PATH_CACHE_DIR": (self, "cache_dir"),
             "TEXT2PATH_TOOLS_DIR": (self, "tools_dir"),
@@ -181,6 +221,11 @@ class Config:
                 "precision": self.conversion.precision,
                 "preserve_styles": self.conversion.preserve_styles,
                 "output_suffix": self.conversion.output_suffix,
+            },
+            "security": {
+                "ignore_size_limits": self.security.ignore_size_limits,
+                "max_file_size_mb": self.security.max_file_size_mb,
+                "max_decompressed_size_mb": self.security.max_decompressed_size_mb,
             },
             "log_level": self.log_level,
             "cache_dir": str(self.cache_dir),

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from svg_text2path.fonts.cache import FontCache, MissingFontError
+from svg_text2path.fonts import FontCache, MissingFontError
 
 
 class TestFontCacheInitialization:
@@ -188,19 +188,16 @@ class TestMissingFontErrorHandling:
         assert issubclass(MissingFontError, Exception)
 
     def test_missing_font_error_has_required_fields(self):
-        """Verify MissingFontError dataclass has required fields."""
+        """Verify MissingFontError/FontNotFoundError has required attributes."""
         err = MissingFontError(
-            family="FakeFont",
+            font_family="FakeFont",
             weight=400,
             style="normal",
-            stretch="normal",
-            message="Font not found",
         )
-        assert err.family == "FakeFont"
+        assert err.font_family == "FakeFont"
         assert err.weight == 400
         assert err.style == "normal"
-        assert err.stretch == "normal"
-        assert err.message == "Font not found"
+        assert "FakeFont" in err.message
 
     @pytest.mark.slow
     def test_get_font_nonexistent_font_uses_fallback(self):

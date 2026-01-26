@@ -6,6 +6,10 @@ This subpackage provides:
 - Codepoint coverage tracking
 """
 
-from svg_text2path.fonts.cache import FontCache, MissingFontError
+from svg_text2path.exceptions import FontNotFoundError
+from svg_text2path.fonts.cache import FontCache
 
-__all__ = ["FontCache", "MissingFontError"]
+# Backward compatibility alias
+MissingFontError = FontNotFoundError
+
+__all__ = ["FontCache", "FontNotFoundError", "MissingFontError"]

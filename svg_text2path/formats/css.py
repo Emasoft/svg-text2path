@@ -65,7 +65,7 @@ class CSSHandler(FormatHandler):
 
         try:
             root = ET.fromstring(svg_content)
-            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse SVG from CSS data URI: {e}") from e
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import urllib.error
 import urllib.request
 from io import StringIO
 from pathlib import Path
@@ -17,6 +18,7 @@ from xml.etree.ElementTree import register_namespace as _register_namespace
 
 import defusedxml.ElementTree as ET
 
+from svg_text2path import __version__
 from svg_text2path.exceptions import RemoteResourceError, SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
@@ -38,11 +40,17 @@ class RemoteHandler(FormatHandler):
 
     # Blocked IP networks to prevent SSRF attacks
     BLOCKED_NETWORKS = [
+        # IPv4
         ipaddress.ip_network("10.0.0.0/8"),
         ipaddress.ip_network("172.16.0.0/12"),
         ipaddress.ip_network("192.168.0.0/16"),
         ipaddress.ip_network("127.0.0.0/8"),
         ipaddress.ip_network("169.254.0.0/16"),
+        # IPv6
+        ipaddress.ip_network("::1/128"),  # Loopback
+        ipaddress.ip_network("fc00::/7"),  # Unique local
+        ipaddress.ip_network("fe80::/10"),  # Link-local
+        ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped
     ]
 
     def __init__(
@@ -57,10 +65,30 @@ class RemoteHandler(FormatHandler):
             timeout: Request timeout in seconds.
             max_size: Maximum file size to download.
             cache_dir: Optional directory to cache downloaded files.
+
+        Raises:
+            ValueError: If timeout or max_size are not positive.
         """
+        super().__init__()
+        if timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {timeout}")
+        if max_size <= 0:
+            raise ValueError(f"max_size must be positive, got {max_size}")
         self.timeout = timeout
         self.max_size = max_size
         self.cache_dir = cache_dir
+
+    def _get_effective_max_size(self) -> int | None:
+        """Get effective max download size based on config.
+
+        Returns:
+            int | None: Max size in bytes, or None if limits are disabled.
+        """
+        if self.config and self.config.security.ignore_size_limits:
+            return None
+        if self.config and self.config.security.max_file_size_mb:
+            return self.config.security.max_file_size_mb * 1024 * 1024
+        return self.max_size
 
     @property
     def supported_formats(self) -> list[InputFormat]:
@@ -200,27 +228,39 @@ class RemoteHandler(FormatHandler):
             req = urllib.request.Request(
                 url,
                 headers={
-                    "User-Agent": "svg-text2path/0.2.0",
+                    "User-Agent": f"svg-text2path/{__version__}",
                     "Accept": "image/svg+xml, application/xml, text/xml, */*",
                 },
             )
 
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                # Check content length
-                content_length = response.headers.get("Content-Length")
-                if content_length and int(content_length) > self.max_size:
-                    raise RemoteResourceError(
-                        url,
-                        details={"error": f"File too large: {content_length} bytes"},
-                    )
+                # Get effective max size based on config
+                effective_max_size = self._get_effective_max_size()
+
+                # Check content length (skip if size limits are disabled)
+                if effective_max_size is not None:
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > effective_max_size:
+                        raise RemoteResourceError(
+                            url,
+                            details={
+                                "error": f"File too large: {content_length} bytes"
+                            },
+                        )
 
                 # Read response
-                content = response.read(self.max_size + 1)
-                if len(content) > self.max_size:
-                    raise RemoteResourceError(
-                        url,
-                        details={"error": f"File too large: >{self.max_size} bytes"},
-                    )
+                if effective_max_size is not None:
+                    content = response.read(effective_max_size + 1)
+                    if len(content) > effective_max_size:
+                        raise RemoteResourceError(
+                            url,
+                            details={
+                                "error": f"File too large: >{effective_max_size} bytes"
+                            },
+                        )
+                else:
+                    # No size limit - read all content
+                    content = response.read()
 
                 # Decode content
                 encoding = response.headers.get_content_charset() or "utf-8"
@@ -232,9 +272,9 @@ class RemoteHandler(FormatHandler):
 
                 return cast(str, svg_content)
 
-        except urllib.error.HTTPError as e:  # type: ignore[reportAttributeAccessIssue]
+        except urllib.error.HTTPError as e:
             raise RemoteResourceError(url, status_code=e.code) from e
-        except urllib.error.URLError as e:  # type: ignore[reportAttributeAccessIssue]
+        except urllib.error.URLError as e:
             raise RemoteResourceError(url, details={"error": str(e.reason)}) from e
         except Exception as e:
             raise RemoteResourceError(url, details={"error": str(e)}) from e
@@ -286,18 +326,21 @@ class RemoteHandler(FormatHandler):
         Returns:
             Path to cache file
 
-        Note:
-            Callers must check self.cache_dir is not None before calling.
+        Raises:
+            ValueError: If cache_dir is not set.
         """
         import hashlib
 
-        assert self.cache_dir is not None, "cache_dir must be set before calling"
+        if self.cache_dir is None:
+            raise ValueError("cache_dir must be set")
+        # Sanitize filename to prevent path traversal
+        parsed = urlparse(url)
+        raw_filename = Path(parsed.path).name or "index"
+        safe_filename = "".join(c for c in raw_filename if c.isalnum() or c in "._-")
         # Create hash of URL for filename
         url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
-        parsed = urlparse(url)
-        filename = Path(parsed.path).name or "index"
 
-        return self.cache_dir / f"{url_hash}_{filename}"
+        return self.cache_dir / f"{url_hash}_{safe_filename}"
 
     def _register_namespaces(self) -> None:
         """Register common SVG namespaces."""

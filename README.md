@@ -31,7 +31,7 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 - **Unicode BiDi** - RTL languages (Arabic, Hebrew) rendered correctly
 - **TextPath support** - Text along paths with tangent-based placement
 - **Strict font matching** - Fails on missing fonts (no silent fallbacks)
-- **Multiple input formats** - SVG files, SVG strings (API), ElementTree (API)
+- **Multi-format input** - SVG files, HTML, CSS, URLs, Python/JS code, Markdown, RST, ePub
 - **Visual diff tools** - Pixel-perfect comparison via svg-bbox
 - **Cross-platform** - Works on macOS, Linux, and Windows
 
@@ -193,6 +193,40 @@ text2path convert input.svg -o output.svg
 # Convert with higher precision (more decimal places in paths)
 text2path convert input.svg -o output.svg --precision 8
 
+# Convert large files that exceed default size limits
+text2path convert large_file.svgz -o output.svg --no-size-limit
+```
+
+#### Supported Input Formats
+
+All formats are auto-detected. Use `--format <type>` to force a specific format.
+
+| Format | Extension | Example Command | Description |
+|--------|-----------|-----------------|-------------|
+| **SVG** | `.svg` | `text2path convert input.svg -o output.svg` | Standard SVG files |
+| **SVGZ** | `.svgz` | `text2path convert compressed.svgz -o out.svgz` | Gzip-compressed SVG |
+| **Inkscape** | `.svg` | `text2path convert inkscape.svg -o out.svg` | Preserves sodipodi/inkscape metadata |
+| **HTML** | `.html` | `text2path convert page.html -o page_out.html` | Inline SVG, `<object>`, `<img>`, data URIs |
+| **CSS** | `.css` | `text2path convert styles.css -o styles_out.css` | SVG in `url()` data URIs |
+| **Python** | `.py` | `text2path convert icons.py -o icons_out.py` | SVG strings in Python code |
+| **JavaScript** | `.js`, `.ts`, `.jsx`, `.tsx` | `text2path convert app.tsx -o app_out.tsx` | SVG in template literals and strings |
+| **Markdown** | `.md` | `text2path convert README.md -o README_out.md` | Embedded SVG (HTML blocks, data URIs) |
+| **RST** | `.rst` | `text2path convert docs.rst -o docs_out.rst` | reStructuredText `.. raw::` directives |
+| **Plain Text** | `.txt` | `text2path convert base64.txt -o base64_out.txt` | Base64-encoded SVG content |
+| **ePub** | `.epub` | `text2path convert book.epub -o book_out.epub` | ePub v3+ ebooks with embedded SVG |
+| **Remote URL** | `https://` | `text2path convert "https://example.com/icon.svg" -o icon.svg` | Fetch and convert remote SVG |
+| **Data URI** | `data:` | `text2path convert 'data:image/svg+xml;base64,PHN2Zy...' -o out.svg` | Base64 or URL-encoded SVG |
+| **CSS URL** | `url()` | `text2path convert 'url("data:image/svg+xml;base64,...")' -o out.txt` | CSS url() wrapped data URI |
+
+#### Additional Commands
+
+```bash
+# Force specific input format
+text2path convert input --format html -o output.html
+
+# Output as base64 data URI
+text2path convert input.svg --base64 -o encoded.txt
+
 # Batch convert multiple files
 text2path batch convert *.svg --output-dir ./converted/
 
@@ -212,7 +246,7 @@ text2path fonts find "Noto Sans"
 text2path fonts report input.svg --detailed
 
 # Check external dependencies
-text2path deps check
+text2path deps
 ```
 
 ## Use Cases
@@ -294,6 +328,12 @@ replacements:
   "Arial": "Liberation Sans"
   "Helvetica": "Liberation Sans"
   "Times New Roman": "Liberation Serif"
+
+# Security settings for file size limits
+security:
+  ignore_size_limits: false     # Bypass all size limits (WARNING: security risk)
+  max_file_size_mb: 50          # Maximum input file size in MB
+  max_decompressed_size_mb: 100 # Maximum decompressed size for .svgz/.epub
 ```
 
 ### Environment Variables
@@ -303,7 +343,12 @@ replacements:
 export T2P_FONT_CACHE=/path/to/font_cache.json
 
 # Verbose logging
-export T2P_LOG_LEVEL=DEBUG
+export TEXT2PATH_LOG_LEVEL=DEBUG
+
+# Security settings
+export TEXT2PATH_IGNORE_SIZE_LIMITS=true   # Bypass file size limits (use with caution)
+export TEXT2PATH_MAX_FILE_SIZE_MB=100      # Custom max file size (default: 50)
+export TEXT2PATH_MAX_DECOMPRESSED_SIZE_MB=200  # Custom max decompressed size (default: 100)
 ```
 
 ## API Reference
@@ -410,7 +455,7 @@ The first run builds a font cache. Speed up subsequent runs:
 
 ```bash
 # Pre-warm the cache
-text2path fonts cache --rebuild
+text2path fonts cache --refresh
 
 # Or set a custom cache location
 export T2P_FONT_CACHE=/fast/disk/font_cache.json
@@ -478,6 +523,10 @@ fnt install "Noto Sans"      # Install a font
 - **XXE Protection**: All XML parsing uses `defusedxml`
 - **SSRF Protection**: Remote URL fetching blocks private IP ranges (10.x, 172.16.x, 192.168.x, 127.x)
 - **Input Validation**: File paths are validated before processing
+- **Decompression Bomb Protection**: Size limits on compressed files (.svgz, .epub)
+  - Default max file size: 50MB
+  - Default max decompressed size: 100MB
+  - Can be customized via config or overridden with `--no-size-limit` (use with caution)
 
 ## License
 

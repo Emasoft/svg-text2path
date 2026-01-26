@@ -18,8 +18,38 @@ import defusedxml.ElementTree as ET
 from svg_text2path.exceptions import SVGParseError
 from svg_text2path.formats.base import FormatHandler, InputFormat
 
+# Maximum decompressed size to prevent decompression bombs (100MB)
+MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024
+
 if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
+
+
+def _read_gzip_limited(
+    path: Path, max_size: int = MAX_DECOMPRESSED_SIZE, ignore_limits: bool = False
+) -> str:
+    """Read gzip file with size limit to prevent decompression bombs.
+
+    Args:
+        path: Path to gzip-compressed file
+        max_size: Maximum allowed decompressed size in bytes
+        ignore_limits: If True, bypass size limit checks (for trusted files)
+
+    Returns:
+        Decompressed file content as string
+
+    Raises:
+        SVGParseError: If decompressed size exceeds limit (unless ignore_limits=True)
+    """
+    with gzip.open(path, "rb") as gz:
+        chunks: list[bytes] = []
+        total_size = 0
+        while chunk := gz.read(8192):
+            total_size += len(chunk)
+            if not ignore_limits and total_size > max_size:
+                raise SVGParseError(f"Decompressed file exceeds {max_size} bytes limit")
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8")
 
 
 # Inkscape namespaces
@@ -45,6 +75,7 @@ class InkscapeHandler(FormatHandler):
             strip_inkscape: If True, remove Inkscape-specific elements
                            and attributes during parsing.
         """
+        super().__init__()  # Initialize config support from base class
         self.strip_inkscape = strip_inkscape
 
     @property
@@ -212,13 +243,31 @@ class InkscapeHandler(FormatHandler):
         Returns:
             ElementTree
         """
-        if not path.exists():
+        if not path.is_file():
+            if path.is_dir():
+                raise IsADirectoryError(f"Expected file, got directory: {path}")
             raise FileNotFoundError(f"SVG file not found: {path}")
 
         try:
             if path.suffix.lower() == ".svgz" or self._is_gzipped(path):
-                with gzip.open(path, "rt", encoding="utf-8") as f:
-                    return cast(ElementTree, ET.parse(f))
+                # Determine size limit settings from config
+                ignore_limits = False
+                max_size = MAX_DECOMPRESSED_SIZE
+
+                if self.config and hasattr(self.config, "security"):
+                    ignore_limits = self.config.security.ignore_size_limits
+                    if not ignore_limits:
+                        # Respect configured max size (convert MB to bytes)
+                        max_size = (
+                            self.config.security.max_decompressed_size_mb * 1024 * 1024
+                        )
+
+                # Use size-limited reader to prevent decompression bombs
+                content = _read_gzip_limited(
+                    path, max_size=max_size, ignore_limits=ignore_limits
+                )
+                root = ET.fromstring(content)
+                return cast(ElementTree, ET.ElementTree(root))
             return cast(ElementTree, ET.parse(str(path)))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG: {e}") from e
@@ -234,7 +283,7 @@ class InkscapeHandler(FormatHandler):
         """
         try:
             root = ET.fromstring(svg_str)
-            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[reportAttributeAccessIssue]
+            return cast(ElementTree, ET.ElementTree(root))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG string: {e}") from e
 
@@ -247,14 +296,17 @@ class InkscapeHandler(FormatHandler):
         Returns:
             True if Inkscape SVG
         """
-        if not path.exists():
+        if not path.is_file():
             return False
 
         try:
-            # Read first 2KB to check for markers
+            # Read first 2KB to check for markers (safe limit for gzip too)
             if path.suffix.lower() == ".svgz":
-                with gzip.open(path, "rt", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(2000)
+                # Use limited read for gzip to prevent decompression bombs
+                with gzip.open(path, "rb") as gz:
+                    # Read only 2KB max to check for markers
+                    raw = gz.read(2048)
+                    content = raw.decode("utf-8", errors="ignore")
             else:
                 with open(path, encoding="utf-8", errors="ignore") as f:
                     content = f.read(2000)

@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-01-25
+## [0.4.2] - 2026-01-26
+
+### Added
+
+- **Security configuration**: New `SecurityConfig` dataclass for file size limits
+  - `--no-size-limit` CLI flag to bypass file size limits for large files
+  - `security.ignore_size_limits` YAML config option
+  - `security.max_file_size_mb` - configurable max file size (default: 50MB)
+  - `security.max_decompressed_size_mb` - configurable max decompressed size (default: 100MB)
+  - `TEXT2PATH_IGNORE_SIZE_LIMITS`, `TEXT2PATH_MAX_FILE_SIZE_MB`, `TEXT2PATH_MAX_DECOMPRESSED_SIZE_MB` environment variables
+- **Config property on handlers**: All format handlers now receive config via `handler.config` property
+
+### Security
+
+- **Decompression bomb protection**: All handlers that process compressed files (.svgz, .epub) and remote URLs now enforce configurable size limits
+- Size limits can be overridden for trusted large files using `--no-size-limit` flag
+
+## [0.4.1] - 2026-01-25
+
+### Changed
+
+- **Documentation improvements**: Added comprehensive beginner-friendly comments to examples
+- **Type safety improvements**: Enhanced type annotations throughout codebase
+
+### Added
+
+- New SVG DOM manipulation examples using `lxml` and `minidom` libraries
+
+## [0.4.0] - 2026-01-25
 
 ### Added
 

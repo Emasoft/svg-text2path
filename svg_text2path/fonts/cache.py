@@ -21,20 +21,10 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
-
-
-@dataclass
-class MissingFontError(Exception):
-    family: str
-    weight: int
-    style: str
-    stretch: str
-    message: str
+from fontTools.ttLib import TTFont
 
 
 class FontCache:
@@ -262,7 +252,7 @@ class FontCache:
             weight = 400
             try:
                 if "OS/2" in tt:
-                    weight = int(tt["OS/2"].usWeightClass)  # type: ignore[reportAttributeAccessIssue]
+                    weight = int(tt["OS/2"].usWeightClass)
             except Exception:
                 pass
             flags: dict[str, bool] = {}

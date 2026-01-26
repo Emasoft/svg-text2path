@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import urllib.request
+import zipfile
 from pathlib import Path
 
 
@@ -98,6 +100,43 @@ def ensure_tool_installed(tool_name: str, auto_install: bool = True) -> Path | N
         return None
 
 
+def _safe_extract_zip(zip_ref: zipfile.ZipFile, dest_dir: Path) -> None:
+    """Safely extract ZIP archive, preventing path traversal attacks (Zip Slip).
+
+    Args:
+        zip_ref: Open ZipFile object to extract
+        dest_dir: Destination directory for extraction
+
+    Raises:
+        ValueError: If any archive member attempts path traversal
+    """
+    dest_dir = dest_dir.resolve()
+    for member in zip_ref.namelist():
+        # Normalize the path to handle different path separators
+        member_path = os.path.normpath(member)
+
+        # Block absolute paths - archive members should always be relative
+        if os.path.isabs(member_path):
+            raise ValueError(f"Absolute path in ZIP not allowed: {member}")
+
+        # Block parent directory traversal attempts
+        is_traversal = (
+            member_path.startswith("..")
+            or "/../" in member_path
+            or member_path.startswith("/")
+        )
+        if is_traversal:
+            raise ValueError(f"Path traversal attempt blocked: {member}")
+
+        # Compute target path and verify it stays within dest_dir
+        target_path = (dest_dir / member_path).resolve()
+        if not str(target_path).startswith(str(dest_dir)):
+            raise ValueError(f"Path would escape destination: {member}")
+
+    # All members validated - safe to extract
+    zip_ref.extractall(dest_dir)
+
+
 def _download_tool(tool_name: str, repo: str, dest: Path) -> None:
     """Download tool from GitHub.
 
@@ -114,11 +153,9 @@ def _download_tool(tool_name: str, repo: str, dest: Path) -> None:
 
     urllib.request.urlretrieve(zip_url, zip_path)
 
-    # Extract
-    import zipfile
-
+    # Extract safely - prevent Zip Slip path traversal attacks
     with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(dest.parent)
+        _safe_extract_zip(z, dest.parent)
 
     # Move extracted folder
     extracted = dest.parent / f"{repo.split('/')[-1]}-main"
