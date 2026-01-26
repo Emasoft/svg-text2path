@@ -344,7 +344,8 @@ class TestCheckSystemTool:
         assert info.status == DependencyStatus.OK
         assert info.path is not None
         assert isinstance(info.path, Path)
-        assert info.path.name == "ls"
+        # On Windows, executable might be ls.EXE, so check stem instead of name
+        assert info.path.stem.lower() == "ls"
 
     def test_check_tool_extracts_version(self) -> None:
         """check_system_tool extracts version from tool output."""
