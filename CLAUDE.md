@@ -187,6 +187,26 @@ svg-text2path/
 └── pyproject.toml       # Project configuration
 ```
 
+### Development Folders (Gitignored)
+
+**IMPORTANT:** All `*_dev` folders are gitignored and must NEVER be committed to the repository:
+
+- `docs_dev/` - Development documentation, reference files
+- `scripts_dev/` - Development scripts, utilities
+- `samples_dev/` - Development sample files
+- `examples_dev/` - Development examples
+- `tests_dev/` - Development test files
+- `downloads_dev/` - Downloaded resources
+- `libs_dev/` - Development libraries
+- `builds_dev/` - Build artifacts
+
+If files from these folders accidentally get tracked, remove them with:
+```bash
+git rm --cached -r <folder_name>/
+```
+
+The `.gitattributes` file also marks these as `linguist-vendored` to exclude them from GitHub language statistics.
+
 ## Key Patterns
 
 ### Transform Handling
