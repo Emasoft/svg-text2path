@@ -1,0 +1,17 @@
+# GitHub Linguist overrides
+# See: https://github.com/github-linguist/linguist/blob/main/docs/overrides.md
+
+# Exclude development/reference files from language statistics
+docs_dev/** linguist-vendored
+scripts_dev/** linguist-vendored
+samples_dev/** linguist-vendored
+examples_dev/** linguist-vendored
+
+# Exclude node_modules and other vendored code
+node_modules/** linguist-vendored
+
+# Mark test fixtures as generated (not counted in stats)
+tests/fixtures/** linguist-generated
+
+# Ensure Python is detected as primary language
+*.py linguist-detectable=true
