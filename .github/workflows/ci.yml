@@ -32,7 +32,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Lint with ruff
-        run: uv run ruff check svg_text2path/ text2path/
+        run: uv run ruff check svg_text2path/
 
       - name: Type check with mypy
         run: uv run mypy svg_text2path/ --ignore-missing-imports
@@ -66,7 +66,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Check formatting with ruff
-        run: uv run ruff format --check svg_text2path/ text2path/
+        run: uv run ruff format --check svg_text2path/
 
       - name: Check imports with ruff
-        run: uv run ruff check --select I svg_text2path/ text2path/
+        run: uv run ruff check --select I svg_text2path/
