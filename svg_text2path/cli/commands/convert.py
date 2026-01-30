@@ -154,6 +154,19 @@ def _resolve_output_path(
     is_flag=True,
     help="Validate input and output SVG using svg-matrix (requires Bun)",
 )
+@click.option(
+    "--verify",
+    "verify_conversion",
+    is_flag=True,
+    help="Verify conversion faithfulness using sbb-compare visual diff (requires Bun)",
+)
+@click.option(
+    "--verify-threshold",
+    "verify_threshold",
+    type=float,
+    default=0.5,
+    help="Max acceptable diff percentage for --verify (default: 0.5%%)",
+)
 @click.pass_context
 def convert(
     ctx: click.Context,
@@ -174,6 +187,8 @@ def convert(
     no_size_limit: bool,
     auto_download: bool,
     validate_svg: bool,
+    verify_conversion: bool,
+    verify_threshold: float,
 ) -> None:
     """Convert SVG text elements to paths.
 
@@ -356,6 +371,12 @@ def convert(
                     if output_validation.error:
                         console.print(f"  - {output_validation.error}")
 
+    # Verify conversion faithfulness using sbb-compare (only for SVG file sources)
+    if verify_conversion and match.source_type == "file":
+        _verify_conversion_with_sbb_compare(
+            input_source, out, verify_threshold, quiet, console
+        )
+
 
 def _print_fonts_used(handler: Any, source: str) -> None:
     """Analyze and print fonts used in SVG."""
@@ -398,3 +419,115 @@ def _write_base64_output(tree: Any, output_path: Path) -> None:
 
     # Write to file
     output_path.write_text(data_uri)
+
+
+def _verify_conversion_with_sbb_compare(
+    original: str,
+    converted: Path,
+    threshold: float,
+    quiet: bool,
+    console: Console,
+) -> None:
+    """Verify conversion faithfulness using sbb-compare visual diff.
+
+    Runs bunx sbb-compare to compute pixel difference between original
+    and converted SVG. Reports pass/fail based on threshold.
+    """
+    import shutil
+    import subprocess
+
+    # Check for bun availability
+    bun_path = shutil.which("bun")
+    if not bun_path:
+        console.print(
+            "[yellow]⚠[/yellow] Verification skipped: bun not found. "
+            "Install from https://bun.sh"
+        )
+        return
+
+    # Resolve paths - use input file's directory as CWD for sbb-compare
+    # This is the safest approach for sbb-compare's path security checks
+    orig_path = Path(original).resolve()
+    conv_path = converted.resolve()
+
+    # Use the input file's parent directory as CWD
+    cwd = orig_path.parent
+
+    # Make orig relative (will be just the filename)
+    orig_rel = orig_path.name
+
+    # Make conv_path relative to cwd if possible, otherwise absolute
+    try:
+        conv_rel = conv_path.relative_to(cwd)
+    except ValueError:
+        # Converted file is not in the same tree - use absolute path
+        conv_rel = conv_path
+
+    # Build sbb-compare command
+    cmd = [
+        "bunx",
+        "sbb-compare",
+        "--quiet",  # Only output diff percentage
+        "--headless",  # Don't open browser
+        str(orig_rel),
+        str(conv_rel),
+    ]
+
+    with console.status("[bold green]Verifying conversion faithfulness..."):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=cwd,
+            )
+
+            # Parse diff percentage from output (format: "X.XX%" or just a number)
+            output = result.stdout.strip()
+            stderr = result.stderr.strip()
+
+            # sbb-compare --quiet outputs just the diff percentage
+            diff_pct = None
+            try:
+                # Handle output like "0.12%" or "0.12"
+                clean_output = output.replace("%", "").strip()
+                if clean_output:
+                    diff_pct = float(clean_output)
+            except ValueError:
+                pass
+
+            if diff_pct is not None:
+                passed = diff_pct <= threshold
+                if not quiet:
+                    if passed:
+                        console.print(
+                            f"[green]✓[/green] Verification passed: "
+                            f"{diff_pct:.2f}% diff (threshold: {threshold}%)"
+                        )
+                    else:
+                        console.print(
+                            f"[red]✗[/red] Verification failed: "
+                            f"{diff_pct:.2f}% diff exceeds threshold {threshold}%"
+                        )
+            else:
+                # Could not parse diff percentage
+                if not quiet:
+                    if stderr:
+                        console.print(
+                            f"[yellow]⚠[/yellow] Verification issue: {stderr}"
+                        )
+                    elif output:
+                        console.print(
+                            f"[yellow]⚠[/yellow] Verification output: {output}"
+                        )
+                    else:
+                        console.print(
+                            "[yellow]⚠[/yellow] Verification: "
+                            "no output from sbb-compare"
+                        )
+
+        except subprocess.TimeoutExpired:
+            console.print("[yellow]⚠[/yellow] Verification timed out after 60 seconds")
+        except FileNotFoundError:
+            console.print("[yellow]⚠[/yellow] Verification skipped: bunx not found")
