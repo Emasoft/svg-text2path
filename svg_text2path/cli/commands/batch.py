@@ -165,6 +165,40 @@ settings:
 
 
 # -----------------------------------------------------------------------------
+# FILE FORMATS TO CONVERT (REQUIRED)
+# -----------------------------------------------------------------------------
+# You MUST explicitly enable each format you want to convert.
+# All formats default to false for safety - nothing is converted unless enabled.
+#
+# Enable only the formats you need. Set to true to include, false to exclude.
+
+formats:
+  # SVG files - standard SVG and compressed SVGZ
+  svg: true                 # .svg files
+  svgz: false               # .svgz compressed files
+
+  # Web files - HTML and CSS with embedded/data-URI SVG
+  html: false               # .html, .htm, .xhtml files
+  css: false                # .css files (SVG in data URIs)
+
+  # Data files - escaped SVG in structured formats
+  json: false               # .json files (escaped SVG strings)
+  csv: false                # .csv files (escaped SVG strings)
+
+  # Documentation - SVG in documentation formats
+  markdown: false           # .md, .markdown files
+  rst: false                # .rst reStructuredText files
+
+  # Code files - SVG embedded in source code
+  python: false             # .py files (SVG in string literals)
+  javascript: false         # .js, .ts, .jsx, .tsx files
+
+  # Other formats
+  plaintext: false          # .txt files (data URIs)
+  epub: false               # .epub ebook files
+
+
+# -----------------------------------------------------------------------------
 # INPUT FILES AND FOLDERS (REQUIRED)
 # -----------------------------------------------------------------------------
 # You MUST specify at least one input. Remove the example and add your own.
@@ -284,6 +318,45 @@ log_file: batch_conversion_log.json
 
 
 @dataclass
+class FormatSelection:
+    """File formats to include in batch conversion.
+
+    Only formats explicitly set to True will be processed.
+    All formats default to False for safety - user must opt-in.
+    """
+
+    svg: bool = False  # .svg files
+    svgz: bool = False  # .svgz compressed files
+    html: bool = False  # .html, .htm, .xhtml files
+    css: bool = False  # .css files (data URIs)
+    json: bool = False  # .json files (escaped SVG)
+    csv: bool = False  # .csv files (escaped SVG)
+    markdown: bool = False  # .md, .markdown files
+    python: bool = False  # .py files (SVG in strings)
+    javascript: bool = False  # .js, .ts, .jsx, .tsx files
+    rst: bool = False  # .rst reStructuredText files
+    plaintext: bool = False  # .txt files (data URIs)
+    epub: bool = False  # .epub ebook files
+
+
+# Map format flags to file extensions
+FORMAT_EXTENSIONS: dict[str, list[str]] = {
+    "svg": [".svg"],
+    "svgz": [".svgz"],
+    "html": [".html", ".htm", ".xhtml"],
+    "css": [".css"],
+    "json": [".json"],
+    "csv": [".csv"],
+    "markdown": [".md", ".markdown"],
+    "python": [".py"],
+    "javascript": [".js", ".ts", ".jsx", ".tsx"],
+    "rst": [".rst"],
+    "plaintext": [".txt"],
+    "epub": [".epub"],
+}
+
+
+@dataclass
 class BatchSettings:
     """Settings that apply to all conversions in the batch."""
 
@@ -300,6 +373,7 @@ class BatchSettings:
     verify_image_threshold: float = 5.0
     jobs: int = 4
     continue_on_error: bool = True
+    formats: FormatSelection = field(default_factory=FormatSelection)
 
 
 @dataclass
@@ -342,6 +416,44 @@ class BatchConfigError(ValueError):
     """Raised when batch configuration validation fails."""
 
     pass
+
+
+def _validate_formats(formats_data: dict[str, Any]) -> list[str]:
+    """Validate formats section and return list of errors."""
+    errors: list[str] = []
+
+    valid_formats = {
+        "svg",
+        "svgz",
+        "html",
+        "css",
+        "json",
+        "csv",
+        "markdown",
+        "python",
+        "javascript",
+        "rst",
+        "plaintext",
+        "epub",
+    }
+
+    for key, value in formats_data.items():
+        if key not in valid_formats:
+            valid_list = ", ".join(sorted(valid_formats))
+            errors.append(f"formats.{key}: unknown format (valid: {valid_list})")
+            continue
+        # Allow int for bool (YAML parses 1/0 as ints)
+        if not isinstance(value, (bool, int)):
+            errors.append(
+                f"formats.{key}: expected boolean, got {type(value).__name__}"
+            )
+
+    # Check that at least one format is enabled
+    any_enabled = any(bool(formats_data.get(fmt, False)) for fmt in valid_formats)
+    if not any_enabled:
+        errors.append("formats: at least one format must be enabled (set to true)")
+
+    return errors
 
 
 def _validate_settings(settings_data: dict[str, Any]) -> list[str]:
@@ -539,6 +651,22 @@ def load_batch_config(config_path: Path) -> BatchConfig:
     else:
         all_errors.extend(_validate_settings(settings_data))
 
+    # Validate formats section (required)
+    formats_data = data.get("formats")
+    if formats_data is None:
+        all_errors.append(
+            "formats: required section is missing - "
+            "you must explicitly enable file formats"
+        )
+        formats_data = {}
+    elif not isinstance(formats_data, dict):
+        all_errors.append(
+            f"formats: expected mapping, got {type(formats_data).__name__}"
+        )
+        formats_data = {}
+    else:
+        all_errors.extend(_validate_formats(formats_data))
+
     # Validate inputs section
     inputs_data = data.get("inputs")
     if inputs_data is None:
@@ -573,6 +701,22 @@ def load_batch_config(config_path: Path) -> BatchConfig:
         )
         raise BatchConfigError(error_msg)
 
+    # Build format selection
+    format_selection = FormatSelection(
+        svg=bool(formats_data.get("svg", False)),
+        svgz=bool(formats_data.get("svgz", False)),
+        html=bool(formats_data.get("html", False)),
+        css=bool(formats_data.get("css", False)),
+        json=bool(formats_data.get("json", False)),
+        csv=bool(formats_data.get("csv", False)),
+        markdown=bool(formats_data.get("markdown", False)),
+        python=bool(formats_data.get("python", False)),
+        javascript=bool(formats_data.get("javascript", False)),
+        rst=bool(formats_data.get("rst", False)),
+        plaintext=bool(formats_data.get("plaintext", False)),
+        epub=bool(formats_data.get("epub", False)),
+    )
+
     # Build validated config objects
     settings = BatchSettings(
         precision=settings_data.get("precision", 6),
@@ -588,6 +732,7 @@ def load_batch_config(config_path: Path) -> BatchConfig:
         verify_image_threshold=float(settings_data.get("verify_image_threshold", 5.0)),
         jobs=settings_data.get("jobs", 4),
         continue_on_error=bool(settings_data.get("continue_on_error", True)),
+        formats=format_selection,
     )
 
     # Build input entries (already validated above)
@@ -628,23 +773,72 @@ def load_batch_config(config_path: Path) -> BatchConfig:
     return BatchConfig(settings=settings, inputs=inputs, log_file=log_file)
 
 
-def find_svg_files_with_text(folder: Path) -> list[Path]:
-    """Find all SVG files in folder that contain text elements."""
+def get_enabled_extensions(formats: FormatSelection) -> list[str]:
+    """Get list of file extensions enabled by format selection."""
+    extensions: list[str] = []
+    if formats.svg:
+        extensions.extend(FORMAT_EXTENSIONS["svg"])
+    if formats.svgz:
+        extensions.extend(FORMAT_EXTENSIONS["svgz"])
+    if formats.html:
+        extensions.extend(FORMAT_EXTENSIONS["html"])
+    if formats.css:
+        extensions.extend(FORMAT_EXTENSIONS["css"])
+    if formats.json:
+        extensions.extend(FORMAT_EXTENSIONS["json"])
+    if formats.csv:
+        extensions.extend(FORMAT_EXTENSIONS["csv"])
+    if formats.markdown:
+        extensions.extend(FORMAT_EXTENSIONS["markdown"])
+    if formats.python:
+        extensions.extend(FORMAT_EXTENSIONS["python"])
+    if formats.javascript:
+        extensions.extend(FORMAT_EXTENSIONS["javascript"])
+    if formats.rst:
+        extensions.extend(FORMAT_EXTENSIONS["rst"])
+    if formats.plaintext:
+        extensions.extend(FORMAT_EXTENSIONS["plaintext"])
+    if formats.epub:
+        extensions.extend(FORMAT_EXTENSIONS["epub"])
+    return extensions
+
+
+def find_files_for_conversion(folder: Path, formats: FormatSelection) -> list[Path]:
+    """Find files in folder matching enabled formats with convertible content.
+
+    For SVG files, checks for text elements.
+    For other formats, uses the format handler's can_handle() method.
+    """
+    from svg_text2path.formats import match_handler
     from svg_text2path.svg.parser import find_text_elements, parse_svg
 
-    svg_files = []
-    for svg_path in folder.glob("*.svg"):
-        try:
-            tree = parse_svg(svg_path)
-            root = tree.getroot()
-            if root is not None:
-                text_elements = find_text_elements(root)
-                if text_elements:
-                    svg_files.append(svg_path)
-        except Exception:
-            # Skip files that can't be parsed
-            pass
-    return sorted(svg_files)
+    enabled_extensions = get_enabled_extensions(formats)
+    if not enabled_extensions:
+        return []
+
+    found_files: list[Path] = []
+
+    for ext in enabled_extensions:
+        for file_path in folder.glob(f"*{ext}"):
+            try:
+                # For SVG files, check for text elements directly
+                if ext in (".svg", ".svgz"):
+                    tree = parse_svg(file_path)
+                    root = tree.getroot()
+                    if root is not None:
+                        text_elements = find_text_elements(root)
+                        if text_elements:
+                            found_files.append(file_path)
+                else:
+                    # For other formats, use the handler to check
+                    match = match_handler(str(file_path))
+                    if match.handler.can_handle(str(file_path)):
+                        found_files.append(file_path)
+            except Exception:
+                # Skip files that can't be parsed
+                pass
+
+    return sorted(found_files)
 
 
 def run_verification(
@@ -830,6 +1024,10 @@ def batch_convert(
         validate_svg=settings.validate,
     )
 
+    # Show enabled formats
+    enabled_exts = get_enabled_extensions(settings.formats)
+    console.print(f"[dim]Enabled formats:[/dim] {', '.join(enabled_exts)}")
+
     # Collect all file pairs (input, output)
     file_pairs: list[tuple[Path, Path]] = []
 
@@ -843,21 +1041,26 @@ def batch_convert(
                 )
                 continue
 
-            # Find SVG files with text elements
-            svg_files = find_svg_files_with_text(entry.path)
+            # Find files matching enabled formats
+            matching_files = find_files_for_conversion(entry.path, settings.formats)
             console.print(
-                f"  [dim]{entry.path}[/dim]: {len(svg_files)} SVG files with text"
+                f"  [dim]{entry.path}[/dim]: {len(matching_files)} files to convert"
             )
 
             # Ensure output dir exists
             if entry.output_dir:
                 entry.output_dir.mkdir(parents=True, exist_ok=True)
 
-            for svg_file in svg_files:
-                out_name = f"{svg_file.stem}{entry.suffix}.svg"
+            for input_file in matching_files:
+                # Determine output extension - preserve original
+                if input_file.suffix.lower() in (".svg", ".svgz"):
+                    out_ext = input_file.suffix
+                else:
+                    out_ext = input_file.suffix  # Preserve original extension
+                out_name = f"{input_file.stem}{entry.suffix}{out_ext}"
                 out_path = entry.output_dir / out_name if entry.output_dir else None
                 if out_path:
-                    file_pairs.append((svg_file, out_path))
+                    file_pairs.append((input_file, out_path))
         else:
             # Single file
             if not entry.path.exists():
@@ -884,48 +1087,70 @@ def batch_convert(
     verify_fail_count = 0
 
     def process_file(pair: tuple[Path, Path]) -> ConversionLogEntry:
+        """Process a single file using format handlers for all types."""
+        from svg_text2path.formats import match_handler
+        from svg_text2path.svg.parser import find_text_elements
+
         input_path, output_path = pair
 
         try:
-            result = converter.convert_file(input_path, output_path)
+            # Use format handler to detect and parse the file
+            match = match_handler(str(input_path))
+            match.handler.config = app_config  # Pass config for size limits
 
-            if result.success:
-                # Check if any text was converted
-                if result.text_count == 0:
-                    return ConversionLogEntry(
-                        input_path=str(input_path),
-                        output_path=str(output_path),
-                        status="skipped",
-                        reason="No text elements found",
-                    )
+            # Parse input using the appropriate handler
+            tree = match.handler.parse(str(input_path))
 
-                log_entry = ConversionLogEntry(
-                    input_path=str(input_path),
-                    output_path=str(output_path),
-                    status="success",
-                    text_elements=result.text_count,
-                    path_elements=result.path_count,
-                )
-
-                # Run verification if enabled
-                if settings.verify:
-                    diff_pct, passed = run_verification(
-                        input_path,
-                        output_path,
-                        settings.verify_pixel_threshold,
-                        settings.verify_image_threshold,
-                    )
-                    log_entry.diff_percent = diff_pct
-                    log_entry.verify_passed = passed
-
-                return log_entry
-            else:
+            # Count text elements before conversion
+            root = tree.getroot()
+            if root is None:
                 return ConversionLogEntry(
                     input_path=str(input_path),
                     output_path=str(output_path),
                     status="error",
-                    reason=str(result.errors),
+                    reason="Could not parse SVG root element",
                 )
+
+            text_count = len(find_text_elements(root))
+            if text_count == 0:
+                return ConversionLogEntry(
+                    input_path=str(input_path),
+                    output_path=str(output_path),
+                    status="skipped",
+                    reason="No text elements found",
+                )
+
+            # Convert using the converter
+            converted_tree = converter.convert_tree(tree)
+
+            # Count paths after conversion
+            path_count = len(root.findall(".//{http://www.w3.org/2000/svg}path"))
+            path_count += len(root.findall(".//path"))
+
+            # Serialize output using the handler (preserves HTML/CSS/etc structure)
+            match.handler.serialize(converted_tree, output_path)
+
+            log_entry = ConversionLogEntry(
+                input_path=str(input_path),
+                output_path=str(output_path),
+                status="success",
+                text_elements=text_count,
+                path_elements=path_count,
+            )
+
+            # Run verification if enabled (only for SVG outputs)
+            if settings.verify and output_path.suffix.lower() in (".svg", ".svgz"):
+                diff_pct, passed = run_verification(
+                    input_path,
+                    output_path,
+                    settings.verify_pixel_threshold,
+                    settings.verify_image_threshold,
+                )
+                log_entry.diff_percent = diff_pct
+                log_entry.verify_passed = passed
+
+            return log_entry
+
         except PermissionError as e:
             return ConversionLogEntry(
                 input_path=str(input_path),

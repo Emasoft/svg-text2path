@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-01-30
+
+### Added
+
+- **Explicit format selection for batch mode**: New `formats` YAML section requires explicit opt-in for each file type
+  - All 12 formats configurable: svg, svgz, html, css, json, csv, markdown, python, javascript, rst, plaintext, epub
+  - All formats default to `false` - nothing converts without explicit enabling
+  - Validation enforces at least one format must be enabled
+  - Format handlers now used for all file types (not just SVG)
+
+### Changed
+
+- **Batch config YAML structure**: `formats` section is now required (breaking change)
+  - Existing configs need `formats: svg: true` added to continue working
+  - Template updated with full format selection section
+
+### Fixed
+
+- **Click deprecation warning**: Prefer `importlib.metadata.version()` over `__version__` attribute
+
 ## [0.4.6] - 2026-01-30
 
 ### Fixed

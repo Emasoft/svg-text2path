@@ -18,6 +18,7 @@ from svg_text2path.cli.commands.batch import (
     BatchConfig,
     BatchConfigError,
     BatchSettings,
+    FormatSelection,
     InputEntry,
     load_batch_config,
 )
@@ -86,6 +87,9 @@ class TestLoadBatchConfig:
         config_file = tmp_path / "minimal.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             inputs:
               - path: {temp_svg_file}
                 output: {tmp_path / "output.svg"}
@@ -101,6 +105,7 @@ class TestLoadBatchConfig:
         assert config.settings.precision == 6
         assert config.settings.jobs == 4
         assert config.settings.continue_on_error is True
+        assert config.settings.formats.svg is True
 
     def test_load_full_config(self, tmp_path: Path, temp_svg_file: Path) -> None:
         """Config with all settings loads correctly."""
@@ -122,6 +127,11 @@ class TestLoadBatchConfig:
               verify_image_threshold: 3.5
               jobs: 8
               continue_on_error: false
+
+            formats:
+              svg: true
+              svgz: true
+              html: false
 
             inputs:
               - path: {temp_svg_file}
@@ -147,6 +157,9 @@ class TestLoadBatchConfig:
         assert config.settings.jobs == 8
         assert config.settings.continue_on_error is False
         assert config.log_file == Path("custom_log.json")
+        assert config.settings.formats.svg is True
+        assert config.settings.formats.svgz is True
+        assert config.settings.formats.html is False
 
     def test_folder_mode_input(self, tmp_path: Path, temp_svg_folder: Path) -> None:
         """Folder mode input is parsed correctly."""
@@ -154,6 +167,9 @@ class TestLoadBatchConfig:
         output_dir = tmp_path / "output"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             inputs:
               - path: {temp_svg_folder}/
                 output_dir: {output_dir}
@@ -175,6 +191,9 @@ class TestLoadBatchConfig:
         output_path = tmp_path / "output" / "result.svg"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             inputs:
               - path: {temp_svg_file}
                 output: {output_path}
@@ -195,6 +214,9 @@ class TestLoadBatchConfig:
         config_file = tmp_path / "mixed.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             inputs:
               - path: {temp_svg_folder}/
                 output_dir: {tmp_path / "folder_out"}
@@ -227,6 +249,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "no_inputs.yaml"
         config_file.write_text(
             dedent("""
+            formats:
+              svg: true
             settings:
               precision: 6
         """)
@@ -240,6 +264,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "empty_inputs.yaml"
         config_file.write_text(
             dedent("""
+            formats:
+              svg: true
             inputs: []
         """)
         )
@@ -254,6 +280,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "no_path.yaml"
         config_file.write_text(
             dedent("""
+            formats:
+              svg: true
             inputs:
               - output: /some/output.svg
         """)
@@ -269,6 +297,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "folder_no_out.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             inputs:
               - path: {temp_svg_folder}/
         """)
@@ -284,6 +314,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "file_no_out.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             inputs:
               - path: {temp_svg_file}
         """)
@@ -297,6 +329,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_precision.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               precision: 15
             inputs:
@@ -317,6 +351,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_threshold.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               verify_pixel_threshold: 300
             inputs:
@@ -338,6 +374,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_img_threshold.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               verify_image_threshold: 150.0
             inputs:
@@ -357,6 +395,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_jobs.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               jobs: 0
             inputs:
@@ -375,6 +415,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_type.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               precision: "high"
             inputs:
@@ -393,6 +435,8 @@ class TestBatchConfigValidation:
         config_file = tmp_path / "bad_fonts.yaml"
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
             settings:
               font_dirs:
                 - /valid/path
@@ -494,6 +538,9 @@ class TestBatchConvertCommand:
 
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             settings:
               precision: 6
               continue_on_error: true
@@ -547,6 +594,9 @@ class TestBatchConvertCommand:
 
         config_file.write_text(
             dedent(f"""
+            formats:
+              svg: true
+
             settings:
               continue_on_error: true
               jobs: 1
@@ -636,3 +686,130 @@ class TestInputEntry:
         assert entry.output == Path("/output/result.svg")
         assert entry.output_dir is None
         assert entry.suffix == "_text2path"  # default
+
+
+# ---------------------------------------------------------------------------
+# Tests for FormatSelection
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSelection:
+    """Tests for FormatSelection dataclass and validation."""
+
+    def test_default_all_disabled(self) -> None:
+        """FormatSelection defaults to all formats disabled."""
+        formats = FormatSelection()
+
+        assert formats.svg is False
+        assert formats.svgz is False
+        assert formats.html is False
+        assert formats.css is False
+        assert formats.json is False
+        assert formats.csv is False
+        assert formats.markdown is False
+        assert formats.python is False
+        assert formats.javascript is False
+        assert formats.rst is False
+        assert formats.plaintext is False
+        assert formats.epub is False
+
+    def test_missing_formats_section_raises(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Config without formats section raises BatchConfigError."""
+        config_file = tmp_path / "no_formats.yaml"
+        config_file.write_text(
+            dedent(f"""
+            inputs:
+              - path: {temp_svg_file}
+                output: out.svg
+        """)
+        )
+
+        with pytest.raises(
+            BatchConfigError,
+            match="formats: required section is missing",
+        ):
+            load_batch_config(config_file)
+
+    def test_no_formats_enabled_raises(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Config with no formats enabled raises BatchConfigError."""
+        config_file = tmp_path / "no_formats_enabled.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: false
+              html: false
+            inputs:
+              - path: {temp_svg_file}
+                output: out.svg
+        """)
+        )
+
+        with pytest.raises(
+            BatchConfigError,
+            match="at least one format must be enabled",
+        ):
+            load_batch_config(config_file)
+
+    def test_unknown_format_warns(self, tmp_path: Path, temp_svg_file: Path) -> None:
+        """Config with unknown format raises BatchConfigError."""
+        config_file = tmp_path / "unknown_format.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+              unknown_format: true
+            inputs:
+              - path: {temp_svg_file}
+                output: out.svg
+        """)
+        )
+
+        with pytest.raises(BatchConfigError, match="unknown format"):
+            load_batch_config(config_file)
+
+    def test_invalid_format_type_raises(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Config with non-boolean format value raises BatchConfigError."""
+        config_file = tmp_path / "bad_format_type.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: "yes"
+            inputs:
+              - path: {temp_svg_file}
+                output: out.svg
+        """)
+        )
+
+        with pytest.raises(BatchConfigError, match="expected boolean"):
+            load_batch_config(config_file)
+
+    def test_multiple_formats_enabled(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Config with multiple formats enabled loads correctly."""
+        config_file = tmp_path / "multi_formats.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+              svgz: true
+              html: true
+              python: false
+            inputs:
+              - path: {temp_svg_file}
+                output: out.svg
+        """)
+        )
+
+        config = load_batch_config(config_file)
+
+        assert config.settings.formats.svg is True
+        assert config.settings.formats.svgz is True
+        assert config.settings.formats.html is True
+        assert config.settings.formats.python is False
