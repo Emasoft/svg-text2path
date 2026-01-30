@@ -171,39 +171,37 @@ settings:
 #
 # TWO INPUT MODES (auto-detected):
 #
-# ┌─────────────────────────────────────────────────────────────────────────────┐
-# │ FOLDER MODE                                                                 │
-# │ Process all SVGs in a directory that contain text elements.                 │
-# │ Files without <text>, <tspan>, or <textPath> elements are skipped.          │
-# │                                                                             │
-# │ Required fields:                                                            │
-# │   path:       Source directory (trailing slash recommended for clarity)     │
-# │   output_dir: Where converted files go (created automatically)              │
-# │   suffix:     Added to filename: icon.svg → icon_converted.svg              │
-# └─────────────────────────────────────────────────────────────────────────────┘
+# FOLDER MODE
+# -----------
+# Process all SVGs in a directory that contain text elements.
+# Files without <text>, <tspan>, or <textPath> elements are skipped.
 #
-# ┌─────────────────────────────────────────────────────────────────────────────┐
-# │ FILE MODE                                                                   │
-# │ Process a single file with an explicit output path.                         │
-# │ Use when you need precise control over input/output locations.              │
-# │                                                                             │
-# │ Required fields:                                                            │
-# │   path:   Source SVG file                                                   │
-# │   output: Full output path including filename                               │
-# └─────────────────────────────────────────────────────────────────────────────┘
+# Required fields:
+#   path:       Source directory (trailing slash recommended for clarity)
+#   output_dir: Where converted files go (created automatically)
+#   suffix:     Added to filename: icon.svg -> icon_converted.svg
+#
+# FILE MODE
+# ---------
+# Process a single file with an explicit output path.
+# Use when you need precise control over input/output locations.
+#
+# Required fields:
+#   path:   Source SVG file
+#   output: Full output path including filename
 #
 # TIP: You can mix folder and file entries freely in the same config.
 
 inputs:
 
-  # ── FOLDER MODE EXAMPLE ────────────────────────────────────────────────────
+  # --- FOLDER MODE EXAMPLE ---------------------------------------------------
   # Delete or modify this example to match your project structure.
   #
   - path: ./input_folder/           # Source folder containing SVGs
     output_dir: ./output_folder/    # Destination folder (created if missing)
-    suffix: _converted              # Output: logo.svg → logo_converted.svg
+    suffix: _converted              # Output: logo.svg -> logo_converted.svg
 
-  # ── FILE MODE EXAMPLES (uncomment to use) ──────────────────────────────────
+  # --- FILE MODE EXAMPLES (uncomment to use) ---------------------------------
   #
   # Single file with explicit output path:
   # - path: ./assets/logo.svg
@@ -216,7 +214,7 @@ inputs:
   # - path: ./branding/icon.svg
   #   output: ./mobile/resources/icon-paths.svg
 
-  # ── MULTIPLE FOLDERS EXAMPLE (uncomment to use) ────────────────────────────
+  # --- MULTIPLE FOLDERS EXAMPLE (uncomment to use) ---------------------------
   #
   # Process different icon sizes with different suffixes:
   # - path: ./icons/small/
