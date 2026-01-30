@@ -8,14 +8,16 @@ This module provides:
 
 from __future__ import annotations
 
+import logging
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import defusedxml.ElementTree as ET
 import numpy as np
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 def pixel_tol_to_threshold(pixel_tol: float) -> int:
@@ -98,7 +100,7 @@ class SVGRenderer:
         dim = SVGRenderer._parse_svg_dimensions(svg_path)
         if not dim:
             msg = f"Error: cannot determine SVG dimensions for {svg_path}"
-            print(f"X {msg}", file=sys.stderr)
+            logger.error(msg)
             return False
 
         width, height = dim
@@ -114,7 +116,7 @@ class SVGRenderer:
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
             if result.returncode != 0:
-                print(f"! Chrome render failed: {result.stderr}", file=sys.stderr)
+                logger.error("Chrome render failed: %s", result.stderr)
                 return False
             return png_path.exists()
         except FileNotFoundError:
@@ -122,13 +124,13 @@ class SVGRenderer:
                 "Error: node or Chrome (puppeteer) not found. "
                 "Install Node.js and run `npm install puppeteer`."
             )
-            print(f"X {msg}", file=sys.stderr)
+            logger.error(msg)
             return False
         except subprocess.TimeoutExpired:
-            print(f"X Error: Rendering timeout for {svg_path}", file=sys.stderr)
+            logger.error("Rendering timeout for %s", svg_path)
             return False
         except Exception as e:
-            print(f"X Error rendering {svg_path} with Chrome: {e}", file=sys.stderr)
+            logger.error("Error rendering %s with Chrome: %s", svg_path, e)
             return False
 
 
@@ -343,10 +345,10 @@ def generate_diff_image(
         diff_img[diff_mask] = [255, 0, 0, 255]
 
         Image.fromarray(diff_img).save(output_path)
-        print(f"Saved diff image: {output_path}")
+        logger.info("Saved diff image: %s", output_path)
 
     except Exception as e:
-        print(f"Error generating diff image: {e!s}", file=sys.stderr)
+        logger.error("Error generating diff image: %s", e)
 
 
 def generate_grayscale_diff_map(
@@ -380,7 +382,7 @@ def generate_grayscale_diff_map(
         diff_norm = np.clip(scaled, 0, 255).astype(np.uint8)
 
         Image.fromarray(diff_norm).save(output_path)
-        print(f"Saved grayscale diff map: {output_path}")
+        logger.info("Saved grayscale diff map: %s", output_path)
 
     except Exception as e:
-        print(f"Error generating grayscale diff map: {e!s}", file=sys.stderr)
+        logger.error("Error generating grayscale diff map: %s", e)

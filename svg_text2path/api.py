@@ -209,7 +209,8 @@ class Text2PathConverter:
         # Parse SVG
         try:
             tree = parse_svg(input_path)
-        except Exception as e:
+        except (OSError, ValueError, SyntaxError) as e:
+            # File access error or XML parse error
             raise SVGParseError(
                 f"Failed to parse SVG: {e}", source=str(input_path)
             ) from e
@@ -279,7 +280,8 @@ class Text2PathConverter:
             root = parse_svg_string(svg_content)
             # Wrap in ElementTree for consistent handling (use std lib, not defusedxml)
             tree = ElementTree(root)
-        except Exception as e:
+        except (ValueError, SyntaxError, TypeError) as e:
+            # XML parse error or invalid input type
             raise SVGParseError(f"Failed to parse SVG string: {e}") from e
 
         # Convert
@@ -374,7 +376,8 @@ class Text2PathConverter:
 
             try:
                 result = self.convert_file(input_path, output_path)
-            except Exception as e:
+            except (OSError, SVGParseError, FontNotFoundError) as e:
+                # File I/O, parsing, or font resolution error
                 result = ConversionResult(
                     success=False,
                     input_format="file",
@@ -421,7 +424,8 @@ class Text2PathConverter:
             except FontNotFoundError as e:
                 result.warnings.append(f"Missing font: {e.font_family}")
                 result.missing_fonts.append(f"{e.font_family} (weight={e.weight})")
-            except Exception as e:
+            except (ValueError, KeyError, AttributeError, TypeError) as e:
+                # Text shaping or path generation error for this element
                 elem_id = text_elem.get("id", "unknown")
                 result.warnings.append(f"Failed to convert {elem_id}: {e}")
 
@@ -438,7 +442,8 @@ class Text2PathConverter:
                 path_id = elem.get("id")
                 d = elem.get("d")
                 if path_id and d:
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(ValueError, KeyError):
+                        # parse_path may raise ValueError for invalid path data
                         self._path_map[path_id] = parse_path(d)
 
     def _collect_text_with_parents(
@@ -526,7 +531,8 @@ class Text2PathConverter:
         hb_font = self._hb_font_cache[cache_key]
 
         # Get font metrics for scaling
-        units_per_em = tt_font["head"].unitsPerEm
+        # fonttools type stubs don't properly type the head table attributes
+        units_per_em = tt_font["head"].unitsPerEm  # type: ignore[attr-defined]
         scale = font_size / units_per_em
 
         # Skip BiDi processing for pure ASCII text (performance optimization)

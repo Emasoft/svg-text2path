@@ -12,12 +12,15 @@ Features:
 
 from __future__ import annotations
 
-import json
+import logging
 import shutil
 import socket
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def is_network_available(timeout: float = 2.0) -> bool:
@@ -89,18 +92,39 @@ def ensure_bun_installed() -> bool:
     if is_bun_available():
         return True
 
-    print("Bun not found. Installing...")
+    logger.info("Bun not found. Installing...")
+    script_path: str | None = None
     try:
+        # Download install script to temp file to avoid shell=True command injection
+        with tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".sh", delete=False
+        ) as tmp_script:
+            script_path = tmp_script.name
+            # Download the script using curl without shell=True
+            curl_result = subprocess.run(
+                ["curl", "-fsSL", "https://bun.sh/install"],
+                check=True,
+                capture_output=True,
+            )
+            tmp_script.write(curl_result.stdout)
+
+        # Execute bash with the script file path (no shell=True needed)
         subprocess.run(
-            "curl -fsSL https://bun.sh/install | bash",
-            shell=True,
+            ["bash", script_path],
             check=True,
             capture_output=True,
         )
-        print("Bun installed successfully.")
+
+        # Clean up temp file
+        Path(script_path).unlink(missing_ok=True)
+
+        logger.info("Bun installed successfully.")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"Failed to install Bun: {e}")
+        logger.error("Failed to install Bun: %s", e)
+        # Clean up temp file on error
+        if script_path is not None:
+            Path(script_path).unlink(missing_ok=True)
         return False
 
 
@@ -174,8 +198,6 @@ def validate_svg_string(
         )
 
     # Write to temp file and validate
-    import tempfile
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".svg", delete=False) as tmp:
         tmp.write(svg_content)
         tmp_path = Path(tmp.name)
@@ -242,72 +264,6 @@ def _validate_with_cli(svg_path: Path) -> SVGValidationResult:
             file_path=str(svg_path),
             error=str(e),
         )
-
-
-def _validate_with_script(svg_path: Path) -> SVGValidationResult:
-    """Validate using inline JS script (alternative method).
-
-    Args:
-        svg_path: Path to the SVG file
-
-    Returns:
-        SVGValidationResult
-    """
-    # Escape path for JS string
-    escaped_path = str(svg_path).replace("\\", "\\\\").replace('"', '\\"')
-
-    validate_script = f'''
-const {{ validateSVGAsync }} = await import("@emasoft/svg-matrix");
-const fs = await import("fs");
-const svg = fs.readFileSync("{escaped_path}", "utf8");
-const result = await validateSVGAsync(svg);
-console.log(JSON.stringify(result));
-'''
-
-    try:
-        result = subprocess.run(
-            ["bunx", "--bun", "-e", validate_script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        if result.returncode != 0:
-            return _validate_with_cli(svg_path)
-
-        output = result.stdout.strip()
-        if output:
-            data = json.loads(output)
-            return SVGValidationResult(
-                valid=data.get("valid", False),
-                file_path=str(svg_path),
-                issues=data.get("issues", []),
-            )
-
-    except subprocess.TimeoutExpired:
-        return SVGValidationResult(
-            valid=False,
-            file_path=str(svg_path),
-            error="Validation timed out",
-        )
-    except json.JSONDecodeError as e:
-        return SVGValidationResult(
-            valid=False,
-            file_path=str(svg_path),
-            error=f"JSON parse error: {e}",
-        )
-    except Exception as e:
-        return SVGValidationResult(
-            valid=False,
-            file_path=str(svg_path),
-            error=str(e),
-        )
-
-    return SVGValidationResult(
-        valid=False,
-        file_path=str(svg_path),
-        error="Unknown validation error",
-    )
 
 
 def validate_svg_batch(

@@ -6,6 +6,7 @@ import concurrent.futures
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -23,6 +24,9 @@ from .config import (
     run_verification,
 )
 from .validation import _check_path_accessibility, _is_remote_path
+
+if TYPE_CHECKING:
+    from .validation import PathAccessResult
 
 console = Console()
 
@@ -194,7 +198,7 @@ def batch_convert(
         raise SystemExit(1)
 
     # Initialize preflight errors list (used in log report even if checks disabled)
-    preflight_errors: list[tuple[str, object]] = []
+    preflight_errors: list[tuple[str, PathAccessResult]] = []
 
     # Run preflight accessibility checks if enabled
     if settings.preflight_check:
@@ -220,7 +224,7 @@ def batch_convert(
             )
 
             # Group errors by type for cleaner display
-            error_types: dict[str, list[tuple[str, object]]] = {}
+            error_types: dict[str, list[tuple[str, PathAccessResult]]] = {}
             for path, result in preflight_errors:
                 error_type = result.error_type or "unknown"
                 if error_type not in error_types:

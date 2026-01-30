@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-01-30
+
+### Added
+
+- **Compact YAML input format**: Semicolon-delimited input entries for batch config
+  - File mode: `input_path;output_path`
+  - Folder mode: `input_folder/;output_folder/;suffix`
+  - Escaping: `\;` or `%3B` for literal semicolons, `%20` for spaces
+  - YAML quoted strings supported: `"path;with;semicolons;out.svg"`
+  - Both compact strings and dict format can be mixed in same config
+
+- **Remote path support**: Batch inputs can now reference remote files
+  - SSH paths: `user@host:/path/to/file.svg`
+  - URLs: `https://example.com/icon.svg`, `ftp://...`
+  - Local-to-remote and remote-to-local file transfers
+
+- **In-place conversion**: `allow_overwrite` setting enables same input/output path
+  - Creates `.bak` backup of original file before conversion
+  - Default: false (requires explicit opt-in)
+
+- **Path format validation**: Input and output paths are now validated
+  - Local paths: relative, absolute, home (~/) paths
+  - SSH paths: validates user, host (hostname/IP), and remote path
+  - URLs: validates scheme (http/https/ftp/sftp) and host
+  - Windows paths: drive letters and UNC paths supported
+  - Descriptive error messages for invalid paths
+
+- **Preflight accessibility checks**: `preflight_check` setting (default: true)
+  - Verifies all paths are accessible before processing begins
+  - Checks: file permissions, SSH authentication, network connectivity
+  - Detects: stale NFS mounts, unreachable hosts, disk space issues
+  - Provides actionable suggestions for each error type:
+    - Authentication: SSH key, password, host key issues
+    - Network: DNS resolution, connection timeouts, NAT/firewall
+    - Permission: read/write access, file ownership
+    - Disk: low disk space warnings
+  - Groups errors by type for clear diagnostics
+  - Can be disabled with `preflight_check: false` in settings
+  - All errors saved to JSON log report (`preflight_errors` array)
+
 ## [0.4.8] - 2026-01-30
 
 ### Changed

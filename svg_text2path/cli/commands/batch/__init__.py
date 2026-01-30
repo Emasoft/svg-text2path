@@ -6,17 +6,14 @@ import click
 
 # Import commands
 from .compare import batch_compare
-from .convert import batch_convert
-from .regression import batch_regression
-from .template import BATCH_CONFIG_TEMPLATE, batch_template
 
 # Import config classes and functions for public API
 from .config import (
+    FORMAT_EXTENSIONS,
     BatchConfig,
     BatchConfigError,
     BatchSettings,
     ConversionLogEntry,
-    FORMAT_EXTENSIONS,
     FormatSelection,
     InputEntry,
     find_files_for_conversion,
@@ -24,6 +21,9 @@ from .config import (
     load_batch_config,
     run_verification,
 )
+from .convert import batch_convert
+from .regression import batch_regression
+from .template import BATCH_CONFIG_TEMPLATE, batch_template
 
 # Import validation functions for public API
 from .validation import (
@@ -33,7 +33,6 @@ from .validation import (
     _parse_compact_entry,
     _validate_path_format,
 )
-
 
 # ---------------------------------------------------------------------------
 # Batch Command Group

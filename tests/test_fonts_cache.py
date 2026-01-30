@@ -124,6 +124,7 @@ class TestFontCachingBehavior:
             ]
         }
         cache._save_cache(test_entries, prebaked, False)
+        assert cache._cache_file is not None
         assert cache._cache_file.exists()
         data = json.loads(cache._cache_file.read_text())
         assert data["version"] == FontCache._cache_version
@@ -223,3 +224,85 @@ class TestMissingFontErrorHandling:
             assert ttfont is not None
             assert isinstance(blob, bytes)
             assert isinstance(face_idx, int)
+
+
+class TestCorruptedFontDetection:
+    """Tests for corrupted font detection and repair functionality."""
+
+    def test_corrupted_fonts_file_property_returns_path(self, tmp_path):
+        """Verify _corrupted_fonts_file returns expected path."""
+        cache = FontCache()
+        cache._cache_file = tmp_path / "font_cache.json"
+        path = cache._corrupted_fonts_file
+        assert isinstance(path, Path)
+        assert "corrupted_fonts.json" in str(path)
+
+    def test_validate_font_file_returns_false_for_invalid_file(self, tmp_path):
+        """Verify _validate_font_file returns False for non-font file."""
+        cache = FontCache()
+        fake_font = tmp_path / "fake.ttf"
+        fake_font.write_bytes(b"not a font file content")
+        assert cache._validate_font_file(fake_font) is False
+
+    def test_validate_font_file_returns_false_for_nonexistent_file(self, tmp_path):
+        """Verify _validate_font_file returns False for missing file."""
+        cache = FontCache()
+        missing = tmp_path / "missing.ttf"
+        assert cache._validate_font_file(missing) is False
+
+    def test_corrupted_fonts_set_initialized_empty(self):
+        """Verify FontCache initializes with empty _corrupted_fonts set."""
+        cache = FontCache()
+        assert hasattr(cache, "_corrupted_fonts")
+        assert isinstance(cache._corrupted_fonts, set)
+
+    def test_clear_corrupted_fonts_empties_set(self, tmp_path):
+        """Verify clear_corrupted_fonts() resets the exclusion list."""
+        cache = FontCache()
+        cache._cache_file = tmp_path / "font_cache.json"
+        # Add a fake corrupted font
+        cache._corrupted_fonts.add((str(tmp_path / "bad.ttf"), 0))
+        # Save it
+        cache._save_corrupted_fonts()
+        # Verify file exists
+        assert cache._corrupted_fonts_file.exists()
+        # Clear
+        cache.clear_corrupted_fonts()
+        # Verify set is empty
+        assert len(cache._corrupted_fonts) == 0
+        # Verify file is removed or empty
+        if cache._corrupted_fonts_file.exists():
+            data = json.loads(cache._corrupted_fonts_file.read_text())
+            assert len(data.get("corrupted", [])) == 0
+
+    def test_corrupted_font_persisted_to_file(self, tmp_path):
+        """Verify corrupted fonts are saved to and loaded from file."""
+        cache = FontCache()
+        cache._cache_file = tmp_path / "font_cache.json"
+        bad_path = str(tmp_path / "bad.ttf")
+        cache._corrupted_fonts.add((bad_path, 0))
+        cache._save_corrupted_fonts()
+        # Create new cache instance and load
+        cache2 = FontCache()
+        cache2._cache_file = tmp_path / "font_cache.json"
+        cache2._load_corrupted_fonts()
+        assert (bad_path, 0) in cache2._corrupted_fonts
+
+    def test_is_font_corrupted_returns_true_for_tracked_font(self, tmp_path):
+        """Verify _is_font_corrupted returns True for tracked corrupted fonts."""
+        cache = FontCache()
+        bad_path = tmp_path / "bad.ttf"
+        cache._corrupted_fonts.add((str(bad_path), 0))
+        assert cache._is_font_corrupted(bad_path, 0) is True
+        assert cache._is_font_corrupted(bad_path, 1) is False
+
+    def test_read_font_meta_skips_corrupted_fonts(self, tmp_path):
+        """Verify _read_font_meta skips fonts marked as corrupted."""
+        cache = FontCache()
+        fake_font = tmp_path / "fake.ttf"
+        fake_font.write_bytes(b"\x00" * 100)
+        # Mark as corrupted
+        cache._corrupted_fonts.add((str(fake_font), 0))
+        # Should return None since it's corrupted
+        result = cache._read_font_meta(fake_font, False)
+        assert result is None

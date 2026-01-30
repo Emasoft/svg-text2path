@@ -15,6 +15,7 @@ Key features:
 
 import contextlib
 import json
+import logging
 import os
 import re
 import sys
@@ -24,7 +25,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+from fontTools.ttLib import TTFont, TTLibError  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
 
 
 class FontCache:
@@ -35,6 +38,10 @@ class FontCache:
         self._fonts: dict[str, tuple[TTFont, bytes, int]] = {}
         # (path, font_index) -> codepoints
         self._coverage_cache: dict[tuple[Path, int], set[int]] = {}
+        # Track corrupted fonts as (path_str, font_index) tuples
+        self._corrupted_fonts: set[tuple[str, int]] = set()
+        # Load previously detected corrupted fonts
+        self._load_corrupted_fonts()
 
     def _parse_inkscape_spec(self, inkscape_spec: str) -> tuple[str, str | None]:
         """Parse Inkscape font specification.
@@ -47,6 +54,85 @@ class FontCache:
             return family.strip(), rest.strip() or None
         else:
             return s, None
+
+    @property
+    def _corrupted_fonts_file(self) -> Path:
+        """Location for persistent corrupted fonts list."""
+        cache_dir = self._cache_path().parent
+        return cache_dir / "corrupted_fonts.json"
+
+    def _load_corrupted_fonts(self) -> None:
+        """Load previously detected corrupted fonts from disk."""
+        try:
+            if self._corrupted_fonts_file.exists():
+                data = json.loads(self._corrupted_fonts_file.read_text())
+                for entry in data.get("corrupted", []):
+                    path_str = entry.get("path", "")
+                    font_index = entry.get("font_index", 0)
+                    if path_str:
+                        self._corrupted_fonts.add((path_str, font_index))
+        except (json.JSONDecodeError, KeyError, TypeError, OSError) as e:
+            logger.debug("Could not load corrupted fonts list: %s", e)
+
+    def _save_corrupted_fonts(self) -> None:
+        """Save corrupted fonts list to disk."""
+        try:
+            self._corrupted_fonts_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "corrupted": [
+                    {"path": path_str, "font_index": idx}
+                    for path_str, idx in sorted(self._corrupted_fonts)
+                ]
+            }
+            self._corrupted_fonts_file.write_text(json.dumps(payload, indent=2))
+        except (OSError, PermissionError, TypeError) as e:
+            logger.warning("Could not save corrupted fonts list: %s", e)
+
+    def _validate_font_file(self, path: Path, font_index: int = 0) -> bool:
+        """Check if a font file is valid by attempting to load it with TTFont.
+
+        Args:
+            path: Path to the font file
+            font_index: Index for TTC/OTC collections (default 0)
+
+        Returns:
+            True if font can be loaded successfully, False otherwise
+        """
+        if not path.exists():
+            return False
+        try:
+            suffix = path.suffix.lower()
+            if suffix in {".ttc", ".otc"}:
+                tt = TTFont(path, fontNumber=font_index, lazy=True)
+            else:
+                tt = TTFont(path, lazy=True)
+            # Try to access the name table to verify it's a valid font
+            _ = tt["name"]
+            return True
+        except (TTLibError, OSError, KeyError, AttributeError, ValueError) as e:
+            logger.debug("Font validation failed for %s:%d: %s", path, font_index, e)
+            return False
+
+    def _is_font_corrupted(self, path: Path, font_index: int = 0) -> bool:
+        """Check if a font is in the corrupted fonts list."""
+        return (str(path), font_index) in self._corrupted_fonts
+
+    def _add_corrupted_font(self, path: Path, font_index: int = 0) -> None:
+        """Add a font to the corrupted list and save to disk."""
+        key = (str(path), font_index)
+        if key not in self._corrupted_fonts:
+            self._corrupted_fonts.add(key)
+            logger.warning("Excluding corrupted font: %s", path)
+            self._save_corrupted_fonts()
+
+    def clear_corrupted_fonts(self) -> None:
+        """Reset the corrupted fonts exclusion list."""
+        self._corrupted_fonts.clear()
+        try:
+            if self._corrupted_fonts_file.exists():
+                self._corrupted_fonts_file.write_text(json.dumps({"corrupted": []}))
+        except (OSError, PermissionError) as e:
+            logger.warning("Could not clear corrupted fonts file: %s", e)
 
     def _weight_to_style(self, weight: int) -> str | None:
         """Map CSS font-weight to font style name.
@@ -166,7 +252,9 @@ class FontCache:
             partial = bool(data.get("partial", False))
             if entries:
                 return (entries, prebaked, partial)
-        except Exception:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            # Cache file corrupted or wrong format - will rebuild
+            print(f"⚠️  Font cache parse error: {e}")
             return None
         return None
 
@@ -191,9 +279,15 @@ class FontCache:
         (not just the first). This is critical for fonts like Futura.ttc
         which contain multiple styles.
 
+        Skips fonts that are in the corrupted fonts list.
+
         Returns:
             List of tuples: (path, font_index, families, styles, psname, weight, flags)
         """
+        # Skip if font is marked as corrupted (check index 0 for single fonts)
+        if self._is_font_corrupted(path, 0):
+            return None
+
         try:
             suffix = path.suffix.lower()
             if suffix not in {".ttf", ".otf", ".ttc", ".otc", ".woff2"}:
@@ -210,13 +304,18 @@ class FontCache:
                 try:
                     coll = TTCollection(path, lazy=True)
                     for font_index, tt in enumerate(coll.fonts):
+                        # Skip individual faces marked as corrupted
+                        if self._is_font_corrupted(path, font_index):
+                            continue
                         meta = self._extract_single_font_meta(
                             path, font_index, tt, need_flags
                         )
                         if meta:
                             results.append(meta)
-                except Exception:
-                    # Fallback: try reading as single font with fontNumber=0
+                except (OSError, KeyError, AttributeError, TTLibError) as e:
+                    # TTC collection may be malformed - mark as corrupted
+                    self._add_corrupted_font(path, 0)
+                    print(f"⚠️  TTC collection read error for {path}: {e}")
                     tt = TTFont(path, lazy=True, fontNumber=0)
                     meta = self._extract_single_font_meta(path, 0, tt, need_flags)
                     if meta:
@@ -229,7 +328,10 @@ class FontCache:
                     results.append(meta)
 
             return results if results else None
-        except Exception:
+        except (OSError, KeyError, AttributeError, ValueError, TTLibError) as e:
+            # Font file unreadable or malformed - mark as corrupted and skip
+            self._add_corrupted_font(path, 0)
+            print(f"⚠️  Font metadata read error for {path}: {e}")
             return None
 
     def _extract_single_font_meta(
@@ -253,7 +355,8 @@ class FontCache:
             try:
                 if "OS/2" in tt:
                     weight = int(tt["OS/2"].usWeightClass)
-            except Exception:
+            except (KeyError, AttributeError, TypeError):
+                # OS/2 table missing or malformed - use default weight
                 pass
             flags: dict[str, bool] = {}
             if need_flags:
@@ -270,10 +373,13 @@ class FontCache:
                     flags["cjk"] = any(0x4E00 <= c <= 0x9FFF for c in codes) or any(
                         0x3040 <= c <= 0x30FF for c in codes
                     )
-                except Exception:
+                except (KeyError, AttributeError, TypeError):
+                    # cmap table missing or malformed - coverage flags stay default
                     pass
             return (path, font_index, fams, styles, psname, weight, flags)
-        except Exception:
+        except (KeyError, AttributeError, TypeError, ValueError) as e:
+            # Font metadata extraction failed - skip this font face
+            print(f"⚠️  Font face metadata error for {path}:{font_index}: {e}")
             return None
 
     def _build_cache_entries(
@@ -326,7 +432,7 @@ class FontCache:
                 # _read_font_meta now returns a list of tuples (one per font in TTC)
                 if meta_list:
                     for meta in meta_list:
-                        path, font_index, fams, styles, ps, weight, _flags = meta
+                        path, font_index, fams, styles, ps, weight, _ = meta
                         entries.append((path, font_index, fams, styles, ps, weight))
                         fam_set = set(fams) | ({ps} if ps else set())
                         if fam_set & prebake_fams:
@@ -341,7 +447,8 @@ class FontCache:
                                         if fm[1] == font_index:
                                             flags = fm[-1]
                                             break
-                            except Exception:
+                            except (OSError, KeyError, AttributeError, TypeError):
+                                # Flags computation failed - use empty flags
                                 pass
                             prebaked.setdefault(prebake_key, []).append(
                                 {
@@ -389,8 +496,8 @@ class FontCache:
         }
         try:
             cache_path.write_text(json.dumps(payload))
-        except Exception as e:
-            print(f"⚠️  Could not write font cache: {e}")
+        except (OSError, PermissionError, TypeError) as e:
+            logger.warning("Could not write font cache: %s", e)
 
     def _load_fc_cache(self) -> None:
         """Load persistent font cache (cross-platform). Falls back to scanning."""
@@ -420,7 +527,7 @@ class FontCache:
             spinner_thread.join(timeout=0.5)
             elapsed = time.time() - start
             fonts_count = len(self._fc_cache or [])
-            print(f"Font cache ready in {elapsed:.1f}s ({fonts_count} fonts).")
+            logger.info("Font cache ready in %.1fs (%d fonts).", elapsed, fonts_count)
 
     def prewarm(self) -> int:
         """Ensure the font metadata cache is loaded.
@@ -460,7 +567,7 @@ class FontCache:
         seen_fams: set[str] = set()
         if self._fc_cache is None:
             return found
-        for path, font_index, fams, _styles, ps, _weight in self._fc_cache:
+        for path, font_index, fams, _, ps, _ in self._fc_cache:
             if limit and len(found) >= limit:
                 break
             try:
@@ -492,7 +599,8 @@ class FontCache:
                     continue
                 seen_fams.add(fam_norm)
                 found.append(fam_norm)
-            except Exception:
+            except (OSError, KeyError, AttributeError, TypeError):
+                # Font coverage check failed - skip this font
                 continue
         return found
 
@@ -804,7 +912,8 @@ class FontCache:
                     if best_face_score is not None:
                         return (path, best_idx)
                 return (path, 0)
-            except Exception:
+            except (OSError, KeyError, AttributeError, TypeError):
+                # TTC face selection failed - use first face
                 return (path, 0)
 
         for pattern in patterns:
@@ -833,8 +942,9 @@ class FontCache:
                     if attempt < max_retries - 1:
                         time.sleep(0.5)
                         continue
-                except Exception:
-                    pass
+                except (OSError, subprocess.SubprocessError) as e:
+                    # fc-match invocation failed - try next attempt
+                    logger.debug("fc-match error (attempt %d): %s", attempt + 1, e)
 
             if result and result.returncode == 0:
                 try:
@@ -855,8 +965,9 @@ class FontCache:
                             matched_result = (font_file, font_index)
                             self._fc_match_cache[pattern] = matched_result
                             return matched_result
-                except Exception:
-                    # Cache failure for this pattern
+                except (ValueError, IndexError, OSError) as e:
+                    # fc-match output parsing failed - cache failure for this pattern
+                    logger.debug("fc-match result parse error for '%s': %s", pattern, e)
                     self._fc_match_cache[pattern] = None
                     continue
             else:
@@ -932,10 +1043,12 @@ class FontCache:
                     refresh_font_cache,
                 )
 
-                print(f"Font '{font_family}' not found locally, attempting download...")
+                logger.info(
+                    "Font '%s' not found locally, attempting download...", font_family
+                )
                 result = auto_download_font(font_family)
                 if result.success:
-                    print(f"✓ {result.message}")
+                    logger.info("Font download succeeded: %s", result.message)
                     # Refresh font cache and clear our caches
                     refresh_font_cache()
                     self._fc_match_cache.clear()
@@ -944,7 +1057,7 @@ class FontCache:
                         font_family, weight, style, stretch
                     )
                 else:
-                    print(f"✗ {result.message}")
+                    logger.warning("Font download failed: %s", result.message)
 
             if match_result is None:
                 return None
@@ -968,7 +1081,8 @@ class FontCache:
                             if rec.nameID == nid:
                                 try:
                                     return str(rec.toUnicode()).strip().lower()
-                                except Exception:
+                                except (UnicodeDecodeError, AttributeError):
+                                    # Unicode conversion failed - use raw bytes
                                     return (
                                         str(rec.string, errors="ignore").strip().lower()
                                     )
@@ -989,15 +1103,21 @@ class FontCache:
                 if strict_family and not is_generic and family_mismatch and not_subset:
                     msg = f"Font mismatch: got '{fam_candidate}' "
                     msg += f"for requested '{font_family}'. Using anyway."
-                    print(msg)
+                    logger.warning(msg)
 
                 self._fonts[cache_key] = (ttfont, font_blob, font_index)
                 load_msg = f"Loaded: {font_family} w={weight} s={style} "
                 load_msg += f"st={stretch} -> {font_path.name}:{font_index}"
-                print(load_msg)
+                logger.debug(load_msg)
 
-            except Exception as e:
-                print(f"✗ Failed to load {font_path}:{font_index}: {e}")
+            except TTLibError as e:
+                # Font file corrupted (e.g., bad sfntVersion) - add to corrupted list
+                self._add_corrupted_font(font_path, font_index)
+                logger.error("Corrupted font %s:%d: %s", font_path, font_index, e)
+                return None
+            except (OSError, KeyError, AttributeError, ValueError) as e:
+                # Font file load/parse failed
+                logger.error("Failed to load %s:%d: %s", font_path, font_index, e)
                 return None
 
         return self._fonts.get(cache_key)

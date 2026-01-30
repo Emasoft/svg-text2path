@@ -880,7 +880,7 @@ wheels = [
 
 [[package]]
 name = "svg-text2path"
-version = "0.4.7"
+version = "0.4.9"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

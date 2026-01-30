@@ -20,6 +20,11 @@ from svg_text2path.cli.commands.batch import (
     BatchSettings,
     FormatSelection,
     InputEntry,
+    PathAccessResult,
+    _check_path_accessibility,
+    _is_remote_path,
+    _parse_compact_entry,
+    _validate_path_format,
     load_batch_config,
 )
 from svg_text2path.cli.main import cli
@@ -824,3 +829,465 @@ class TestFormatSelection:
         assert config.settings.formats.svgz is True
         assert config.settings.formats.html is True
         assert config.settings.formats.python is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for compact input format and remote paths
+# ---------------------------------------------------------------------------
+
+
+class TestCompactInputFormat:
+    """Tests for the compact semicolon-delimited input format."""
+
+    def test_parse_file_mode(self) -> None:
+        """Parse compact file mode: input;output."""
+        result = _parse_compact_entry("./input.svg;./output.svg")
+
+        assert result["path"] == "./input.svg"
+        assert result["output"] == "./output.svg"
+        assert result["_is_folder"] is False
+
+    def test_parse_folder_mode(self) -> None:
+        """Parse compact folder mode: input/;output/;suffix."""
+        result = _parse_compact_entry("./input/;./output/;_converted")
+
+        assert result["path"] == "./input"
+        assert result["output_dir"] == "./output"
+        assert result["suffix"] == "_converted"
+        assert result["_is_folder"] is True
+
+    def test_parse_folder_mode_default_suffix(self) -> None:
+        """Parse folder mode with default suffix."""
+        result = _parse_compact_entry("./input/;./output/")
+
+        assert result["path"] == "./input"
+        assert result["output_dir"] == "./output"
+        assert result["suffix"] == "_text2path"
+        assert result["_is_folder"] is True
+
+    def test_parse_url_encoded_spaces(self) -> None:
+        """Parse paths with URL-encoded spaces (%20)."""
+        result = _parse_compact_entry("./my%20files/input.svg;./my%20output/file.svg")
+
+        assert result["path"] == "./my files/input.svg"
+        assert result["output"] == "./my output/file.svg"
+
+    def test_parse_invalid_format_raises(self) -> None:
+        """Invalid format (missing output) raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid format"):
+            _parse_compact_entry("./input.svg")
+
+    def test_load_config_with_compact_format(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Load config with compact string format entries."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        config_file = tmp_path / "compact.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            inputs:
+              - {temp_svg_file};{output_dir / "out.svg"}
+        """)
+        )
+
+        config = load_batch_config(config_file)
+
+        assert len(config.inputs) == 1
+        assert config.inputs[0].is_folder is False
+        assert config.inputs[0].output == output_dir / "out.svg"
+
+    def test_load_config_mixed_formats(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Load config with both compact and dict format entries."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        config_file = tmp_path / "mixed.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            inputs:
+              # Compact format
+              - {temp_svg_file};{output_dir / "out1.svg"}
+              # Dict format
+              - path: {temp_svg_file}
+                output: {output_dir / "out2.svg"}
+        """)
+        )
+
+        config = load_batch_config(config_file)
+
+        assert len(config.inputs) == 2
+        assert config.inputs[0].output == output_dir / "out1.svg"
+        assert config.inputs[1].output == output_dir / "out2.svg"
+
+    def test_parse_escaped_semicolon_backslash(self) -> None:
+        """Parse paths with backslash-escaped semicolons (\\;)."""
+        result = _parse_compact_entry("./path\\;with\\;semicolons.svg;./output.svg")
+
+        assert result["path"] == "./path;with;semicolons.svg"
+        assert result["output"] == "./output.svg"
+
+    def test_parse_escaped_semicolon_url_encoded(self) -> None:
+        """Parse paths with URL-encoded semicolons (%3B)."""
+        result = _parse_compact_entry("./path%3Bwith%3Bsemicolons.svg;./output.svg")
+
+        assert result["path"] == "./path;with;semicolons.svg"
+        assert result["output"] == "./output.svg"
+
+    def test_parse_mixed_escaping(self) -> None:
+        """Parse paths with mixed escaping (backslash and URL encoding)."""
+        # Input with \; and output with %3B
+        result = _parse_compact_entry("./in\\;put.svg;./out%3Bput.svg")
+
+        assert result["path"] == "./in;put.svg"
+        assert result["output"] == "./out;put.svg"
+
+
+class TestRemotePathDetection:
+    """Tests for remote path detection (SSH, URLs)."""
+
+    def test_ssh_path_detected(self) -> None:
+        """SSH paths (user@host:path) are detected as remote."""
+        assert _is_remote_path("user@192.168.1.10:/home/user/file.svg") is True
+        assert _is_remote_path("root@server:/var/www/image.svg") is True
+
+    def test_https_url_detected(self) -> None:
+        """HTTPS URLs are detected as remote."""
+        assert _is_remote_path("https://example.com/icon.svg") is True
+        assert _is_remote_path("https://cdn.site.org/assets/logo.svg") is True
+
+    def test_http_url_detected(self) -> None:
+        """HTTP URLs are detected as remote."""
+        assert _is_remote_path("http://example.com/icon.svg") is True
+
+    def test_ftp_url_detected(self) -> None:
+        """FTP URLs are detected as remote."""
+        assert _is_remote_path("ftp://files.example.com/icon.svg") is True
+
+    def test_sftp_url_detected(self) -> None:
+        """SFTP URLs are detected as remote."""
+        assert _is_remote_path("sftp://files.example.com/icon.svg") is True
+
+    def test_local_path_not_detected(self) -> None:
+        """Local paths are not detected as remote."""
+        assert _is_remote_path("./local/file.svg") is False
+        assert _is_remote_path("/absolute/path/file.svg") is False
+        assert _is_remote_path("~/Documents/file.svg") is False
+        assert _is_remote_path("relative/path/file.svg") is False
+
+    def test_email_in_path_not_detected(self) -> None:
+        """Paths containing @ but not SSH format are not detected as remote."""
+        # Email-like local path should not be detected as SSH
+        assert _is_remote_path("./user@local/file.svg") is False
+
+
+class TestAllowOverwrite:
+    """Tests for allow_overwrite setting validation."""
+
+    def test_same_input_output_without_allow_overwrite_raises(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Same input/output path without allow_overwrite raises error."""
+        config_file = tmp_path / "overwrite.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            settings:
+              allow_overwrite: false
+            inputs:
+              - {temp_svg_file};{temp_svg_file}
+        """)
+        )
+
+        with pytest.raises(BatchConfigError, match="input and output are the same"):
+            load_batch_config(config_file)
+
+    def test_same_input_output_with_allow_overwrite_succeeds(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Same input/output path with allow_overwrite loads successfully."""
+        config_file = tmp_path / "overwrite_ok.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            settings:
+              allow_overwrite: true
+            inputs:
+              - {temp_svg_file};{temp_svg_file}
+        """)
+        )
+
+        config = load_batch_config(config_file)
+
+        assert config.settings.allow_overwrite is True
+        assert len(config.inputs) == 1
+        assert str(config.inputs[0].path) == str(config.inputs[0].output)
+
+
+class TestPathValidation:
+    """Tests for path format validation."""
+
+    def test_valid_local_paths(self) -> None:
+        """Valid local paths return no errors."""
+        assert _validate_path_format("./local/file.svg") == []
+        assert _validate_path_format("/absolute/path/file.svg") == []
+        assert _validate_path_format("~/Documents/file.svg") == []
+        assert _validate_path_format("relative/path/file.svg") == []
+
+    def test_valid_ssh_paths(self) -> None:
+        """Valid SSH paths return no errors."""
+        assert _validate_path_format("user@host:/path/to/file.svg") == []
+        assert _validate_path_format("root@192.168.1.10:/var/www/file.svg") == []
+        assert _validate_path_format("admin@server.example.com:/home/file.svg") == []
+
+    def test_valid_urls(self) -> None:
+        """Valid URLs return no errors."""
+        assert _validate_path_format("https://example.com/icon.svg") == []
+        assert _validate_path_format("http://cdn.site.org/assets/logo.svg") == []
+        assert _validate_path_format("ftp://files.example.com/file.svg") == []
+        assert _validate_path_format("sftp://secure.example.com/file.svg") == []
+
+    def test_empty_path_error(self) -> None:
+        """Empty path returns error."""
+        errors = _validate_path_format("")
+        assert len(errors) == 1
+        assert "empty" in errors[0]
+
+    def test_whitespace_only_path_error(self) -> None:
+        """Whitespace-only path returns error."""
+        errors = _validate_path_format("   ")
+        assert len(errors) == 1
+        assert "empty" in errors[0]
+
+    def test_url_missing_host_error(self) -> None:
+        """URL without host returns error."""
+        errors = _validate_path_format("https:///path/file.svg")
+        assert len(errors) == 1
+        assert "missing host" in errors[0]
+
+    def test_ssh_invalid_user_error(self) -> None:
+        """SSH path with invalid user returns error."""
+        errors = _validate_path_format("123user@host:/path")
+        assert len(errors) >= 1
+        assert any("user" in e.lower() for e in errors)
+
+    def test_ssh_empty_host_error(self) -> None:
+        """SSH path with empty host returns error."""
+        errors = _validate_path_format("user@:/path")
+        assert len(errors) >= 1
+        assert any("host" in e.lower() for e in errors)
+
+    def test_ssh_empty_path_error(self) -> None:
+        """SSH path with empty remote path returns error."""
+        errors = _validate_path_format("user@host:")
+        assert len(errors) >= 1
+        assert any("path" in e.lower() for e in errors)
+
+    def test_null_byte_error(self) -> None:
+        """Path with null byte returns error."""
+        errors = _validate_path_format("path\x00with\x00nulls.svg")
+        assert len(errors) == 1
+        assert "null" in errors[0]
+
+    def test_windows_drive_letter(self) -> None:
+        """Windows drive letter path is valid."""
+        assert _validate_path_format("C:/Users/file.svg") == []
+        assert _validate_path_format("D:\\Documents\\file.svg") == []
+
+    def test_windows_invalid_drive_letter(self) -> None:
+        """Invalid Windows drive letter returns error."""
+        errors = _validate_path_format("1:/invalid/path")
+        assert len(errors) >= 1
+        assert any("drive" in e.lower() for e in errors)
+
+    def test_config_with_invalid_path_raises(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Config with invalid path format raises BatchConfigError."""
+        config_file = tmp_path / "invalid_path.yaml"
+        config_file.write_text(
+            dedent("""
+            formats:
+              svg: true
+            inputs:
+              - user@:/missing_host.svg;./output.svg
+        """)
+        )
+
+        with pytest.raises(BatchConfigError, match="host"):
+            load_batch_config(config_file)
+
+
+class TestPathAccessibility:
+    """Tests for path accessibility checking."""
+
+    def test_local_path_accessible(self, temp_svg_file: Path) -> None:
+        """Existing local file is accessible."""
+        result = _check_path_accessibility(str(temp_svg_file))
+        assert result.accessible is True
+        assert result.error_type is None
+
+    def test_local_dir_accessible(self, tmp_path: Path) -> None:
+        """Existing local directory is accessible."""
+        result = _check_path_accessibility(str(tmp_path))
+        assert result.accessible is True
+
+    def test_nonexistent_path_not_accessible(self, tmp_path: Path) -> None:
+        """Non-existent path with missing parent is not accessible."""
+        nonexistent = tmp_path / "does_not_exist" / "deeply" / "nested" / "file.svg"
+        result = _check_path_accessibility(str(nonexistent))
+        assert result.accessible is False
+        assert result.error_type == "not_found"
+
+    def test_write_check_writable_dir(self, tmp_path: Path) -> None:
+        """Writable directory passes write check."""
+        result = _check_path_accessibility(str(tmp_path), check_write=True)
+        assert result.accessible is True
+
+    def test_path_access_result_dataclass(self) -> None:
+        """PathAccessResult dataclass has correct fields."""
+        result = PathAccessResult(
+            accessible=False,
+            error_type="network",
+            error_message="Connection failed",
+            suggestion="Check network",
+        )
+        assert result.accessible is False
+        assert result.error_type == "network"
+        assert result.error_message == "Connection failed"
+        assert result.suggestion == "Check network"
+
+    def test_url_format_accessible(self) -> None:
+        """Well-formed URL with resolvable host is considered accessible."""
+        # Note: This test may fail if DNS is not working
+        # We're testing the format validation, not actual connectivity
+        result = _check_path_accessibility("https://example.com/file.svg")
+        # example.com should be resolvable
+        assert result.accessible is True or result.error_type == "network"
+
+    def test_invalid_ssh_host_not_accessible(self) -> None:
+        """SSH path with unresolvable host is not accessible."""
+        result = _check_path_accessibility("user@nonexistent-host-xyz123.invalid:/path")
+        assert result.accessible is False
+        assert result.error_type == "network"
+
+
+class TestPreflightCheckSetting:
+    """Tests for preflight_check setting."""
+
+    def test_preflight_check_default_true(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Preflight check is enabled by default."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            inputs:
+              - {temp_svg_file};{tmp_path / "out.svg"}
+        """)
+        )
+
+        config = load_batch_config(config_file)
+        assert config.settings.preflight_check is True
+
+    def test_preflight_check_can_be_disabled(
+        self, tmp_path: Path, temp_svg_file: Path
+    ) -> None:
+        """Preflight check can be disabled in settings."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            dedent(f"""
+            formats:
+              svg: true
+            settings:
+              preflight_check: false
+            inputs:
+              - {temp_svg_file};{tmp_path / "out.svg"}
+        """)
+        )
+
+        config = load_batch_config(config_file)
+        assert config.settings.preflight_check is False
+
+
+class TestPreflightErrorsInLogReport:
+    """Tests for preflight errors being saved to JSON log report."""
+
+    def test_preflight_error_structure(self) -> None:
+        """Verify PathAccessResult can be serialized for log report."""
+        error = PathAccessResult(
+            accessible=False,
+            error_type="auth",
+            error_message="SSH key rejected",
+            suggestion="Check your SSH key configuration",
+        )
+
+        # Simulate the log report structure
+        log_entry = {
+            "path": "/some/path.svg",
+            "error_type": error.error_type,
+            "error_message": error.error_message,
+            "suggestion": error.suggestion,
+        }
+
+        assert log_entry["path"] == "/some/path.svg"
+        assert log_entry["error_type"] == "auth"
+        assert log_entry["error_message"] == "SSH key rejected"
+        assert log_entry["suggestion"] == "Check your SSH key configuration"
+
+    def test_preflight_errors_list_serializable(self) -> None:
+        """List of preflight errors can be JSON serialized."""
+        errors: list[tuple[str, PathAccessResult]] = [
+            (
+                "/input1.svg",
+                PathAccessResult(
+                    accessible=False,
+                    error_type="permission",
+                    error_message="Permission denied",
+                    suggestion="Check file permissions",
+                ),
+            ),
+            (
+                "/input2.svg",
+                PathAccessResult(
+                    accessible=False,
+                    error_type="network",
+                    error_message="Host unreachable",
+                    suggestion="Check network connection",
+                ),
+            ),
+        ]
+
+        # Simulate the log report conversion
+        preflight_errors_json = [
+            {
+                "path": path,
+                "error_type": result.error_type,
+                "error_message": result.error_message,
+                "suggestion": result.suggestion,
+            }
+            for path, result in errors
+        ]
+
+        import json
+
+        # Should be JSON serializable without errors
+        json_str = json.dumps(preflight_errors_json)
+        parsed = json.loads(json_str)
+
+        assert len(parsed) == 2
+        assert parsed[0]["path"] == "/input1.svg"
+        assert parsed[0]["error_type"] == "permission"
+        assert parsed[1]["path"] == "/input2.svg"
+        assert parsed[1]["error_type"] == "network"
