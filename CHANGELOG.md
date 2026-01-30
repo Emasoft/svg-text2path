@@ -22,7 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Folder mode: auto-detects directories, processes all SVGs with text elements
   - File mode: specify exact input/output paths
   - JSON log report with conversion details (success, skipped, errors, verification)
+  - Comprehensive YAML validation with detailed error messages
+  - Type checking, value range validation, and required field enforcement
   - See `samples/batch_config_example.yaml` for full configuration reference
+
+- **YAML template generation**: `text2path batch template [output.yaml]`
+  - Generates a fully-commented YAML configuration template
+  - All settings documented with defaults and examples
+  - `--force` flag to overwrite existing files
 
 ## [0.4.3] - 2026-01-30
 

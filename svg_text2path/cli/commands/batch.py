@@ -23,6 +23,213 @@ console = Console()
 
 
 # ---------------------------------------------------------------------------
+# YAML Template
+# ---------------------------------------------------------------------------
+
+BATCH_CONFIG_TEMPLATE = """\
+# =========================================================================
+# SVG Text2Path - Batch Conversion Configuration
+# =============================================================================
+#
+# This YAML file configures batch conversion of SVG files from text elements
+# to vector path outlines.
+#
+# Usage:
+#   text2path convert --batch config.yaml
+#   text2path batch convert config.yaml
+#
+# All settings are optional except 'inputs' which must list at least one
+# file or folder. Missing or commented-out settings use their default values.
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# CONVERSION SETTINGS
+# -----------------------------------------------------------------------------
+# These settings apply to ALL conversions in this batch.
+# All settings are optional - defaults are shown in comments.
+
+settings:
+
+  # ---------------------------------------------------------------------------
+  # Path Generation
+  # ---------------------------------------------------------------------------
+
+  # precision: Number of decimal places for path coordinates.
+  # Higher values = more accurate but larger file sizes.
+  # Range: 1-10
+  # Default: 6
+  precision: 6
+
+  # preserve_styles: Keep original style attributes on converted path elements.
+  # When true, preserves fill, stroke, font-size etc. as attributes.
+  # When false, only essential path data is kept.
+  # Default: false
+  preserve_styles: false
+
+  # ---------------------------------------------------------------------------
+  # Font Resolution
+  # ---------------------------------------------------------------------------
+
+  # system_fonts_only: Only use fonts installed on the system.
+  # When true, ignores embedded fonts and font URLs in SVG.
+  # Default: false
+  system_fonts_only: false
+
+  # font_dirs: Additional directories to search for font files.
+  # Paths can be absolute or relative to this config file.
+  # Default: [] (empty list - only system fonts)
+  # Example:
+  #   font_dirs:
+  #     - ./fonts
+  #     - /usr/share/fonts/custom
+  #     - ~/Library/Fonts
+  font_dirs: []
+
+  # no_remote_fonts: Disable fetching fonts from remote URLs.
+  # When true, @font-face URLs in SVG will be ignored.
+  # Default: false
+  no_remote_fonts: false
+
+  # auto_download: Automatically download missing fonts.
+  # Uses fontget or fnt tools to find and install missing fonts.
+  # Requires: fontget or fnt installed and on PATH.
+  # Default: false
+  auto_download: false
+
+  # ---------------------------------------------------------------------------
+  # Validation & Verification
+  # ---------------------------------------------------------------------------
+
+  # validate: Validate SVG structure using svg-matrix.
+  # Checks input and output SVG for structural issues.
+  # Requires: Bun runtime (bunx @emasoft/svg-matrix)
+  # Default: false
+  validate: false
+
+  # verify: Verify conversion faithfulness using visual comparison.
+  # Compares original vs converted SVG pixel-by-pixel.
+  # Requires: Bun runtime (bunx sbb-compare)
+  # Default: false
+  verify: false
+
+  # verify_pixel_threshold: Pixel color difference sensitivity.
+  # How different a pixel must be to count as "different".
+  # Lower values = more sensitive (detects smaller differences).
+  # Range: 1-255 (where 1 is most sensitive, 255 is least)
+  # Default: 10
+  verify_pixel_threshold: 10
+
+  # verify_image_threshold: Maximum acceptable difference percentage.
+  # Percentage of pixels that can differ before verification fails.
+  # Lower values = stricter matching requirement.
+  # Range: 0.0-100.0
+  # Default: 5.0
+  verify_image_threshold: 5.0
+
+  # ---------------------------------------------------------------------------
+  # Security
+  # ---------------------------------------------------------------------------
+
+  # no_size_limit: Bypass file size limits.
+  # WARNING: Disabling size limits may allow decompression bombs.
+  # Only use for trusted files that exceed the default 50MB limit.
+  # Default: false
+  no_size_limit: false
+
+  # ---------------------------------------------------------------------------
+  # Processing
+  # ---------------------------------------------------------------------------
+
+  # jobs: Number of parallel conversion workers.
+  # Higher values = faster batch processing but more memory usage.
+  # Set to 1 for sequential processing.
+  # Default: 4
+  jobs: 4
+
+  # continue_on_error: Continue processing when a file fails.
+  # When true, errors are logged but processing continues.
+  # When false, batch stops on first error.
+  # Default: true
+  continue_on_error: true
+
+
+# -----------------------------------------------------------------------------
+# INPUT FILES AND FOLDERS
+# -----------------------------------------------------------------------------
+# REQUIRED: At least one input must be specified.
+#
+# Two input modes are supported:
+#
+# 1. FOLDER MODE - Process all SVGs with text in a directory
+#    Auto-detected when 'path' is a directory.
+#    Required fields: path, output_dir, suffix
+#
+# 2. FILE MODE - Process a single file with explicit output path
+#    Auto-detected when 'path' is a file.
+#    Required fields: path, output
+#
+# You can mix folder and file entries in the same config.
+
+inputs:
+
+  # ---------------------------------------------------------------------------
+  # Example: Folder Mode
+  # ---------------------------------------------------------------------------
+  # Process all SVG files containing text elements in a directory.
+  # Only files with <text>, <tspan>, or <textPath> elements are processed.
+  # Files without text elements are automatically skipped.
+
+  - path: ./input_folder/           # Source folder (must exist)
+    output_dir: ./output_folder/    # Destination folder (created if needed)
+    suffix: _converted              # Suffix added to output filenames
+                                    # Example: icon.svg -> icon_converted.svg
+
+  # ---------------------------------------------------------------------------
+  # Example: File Mode
+  # ---------------------------------------------------------------------------
+  # Process a single SVG file with explicit output path.
+
+  # - path: ./assets/logo.svg                    # Source file (must exist)
+  #   output: ./dist/brand/logo_paths.svg        # Full output path
+
+  # ---------------------------------------------------------------------------
+  # More Examples
+  # ---------------------------------------------------------------------------
+
+  # Multiple folders with different suffixes:
+  # - path: ./icons/small/
+  #   output_dir: ./dist/icons/small/
+  #   suffix: _sm
+
+  # - path: ./icons/large/
+  #   output_dir: ./dist/icons/large/
+  #   suffix: _lg
+
+  # Individual files with custom output locations:
+  # - path: ./branding/wordmark.svg
+  #   output: ./web/assets/wordmark-paths.svg
+
+  # - path: ./branding/icon.svg
+  #   output: ./mobile/resources/icon-paths.svg
+
+
+# -----------------------------------------------------------------------------
+# OUTPUT LOG FILE
+# -----------------------------------------------------------------------------
+# Path to save the JSON log report after batch completion.
+# The log contains:
+#   - Timestamp and settings used
+#   - Summary counts (success, skipped, errors)
+#   - Per-file details (status, text/path counts, verification results)
+#
+# Default: batch_conversion_log.json (in current directory)
+
+log_file: batch_conversion_log.json
+"""
+
+
+# ---------------------------------------------------------------------------
 # Batch Config Schema
 # ---------------------------------------------------------------------------
 
@@ -82,57 +289,273 @@ class ConversionLogEntry:
     verify_passed: bool | None = None
 
 
+class BatchConfigError(ValueError):
+    """Raised when batch configuration validation fails."""
+
+    pass
+
+
+def _validate_settings(settings_data: dict[str, Any]) -> list[str]:
+    """Validate settings section and return list of errors.
+
+    Validates types, value ranges, and semantic constraints.
+    """
+    errors: list[str] = []
+
+    # Type validators for each field
+    validators: dict[str, tuple[type | tuple[type, ...], str]] = {
+        "precision": (int, "integer"),
+        "preserve_styles": (bool, "boolean"),
+        "system_fonts_only": (bool, "boolean"),
+        "font_dirs": (list, "list"),
+        "no_remote_fonts": (bool, "boolean"),
+        "no_size_limit": (bool, "boolean"),
+        "auto_download": (bool, "boolean"),
+        "validate": (bool, "boolean"),
+        "verify": (bool, "boolean"),
+        "verify_pixel_threshold": (int, "integer"),
+        "verify_image_threshold": ((int, float), "number"),
+        "jobs": (int, "integer"),
+        "continue_on_error": (bool, "boolean"),
+    }
+
+    # Validate types
+    for key, value in settings_data.items():
+        if key not in validators:
+            errors.append(f"settings.{key}: unknown setting (will be ignored)")
+            continue
+
+        expected_type, type_name = validators[key]
+        if not isinstance(value, expected_type):
+            # Handle special case: YAML parses 1/0 as ints, allow for bools
+            if expected_type is bool and isinstance(value, int):
+                continue
+            errors.append(
+                f"settings.{key}: expected {type_name}, got {type(value).__name__}"
+            )
+
+    # Validate value ranges
+    if "precision" in settings_data:
+        precision = settings_data["precision"]
+        if isinstance(precision, int) and not (1 <= precision <= 10):
+            errors.append("settings.precision: must be between 1 and 10")
+
+    if "verify_pixel_threshold" in settings_data:
+        threshold = settings_data["verify_pixel_threshold"]
+        if isinstance(threshold, int) and not (1 <= threshold <= 255):
+            errors.append("settings.verify_pixel_threshold: must be between 1 and 255")
+
+    if "verify_image_threshold" in settings_data:
+        threshold = settings_data["verify_image_threshold"]
+        if isinstance(threshold, (int, float)) and not (0.0 <= threshold <= 100.0):
+            errors.append(
+                "settings.verify_image_threshold: must be between 0.0 and 100.0"
+            )
+
+    if "jobs" in settings_data:
+        jobs = settings_data["jobs"]
+        if isinstance(jobs, int) and jobs < 1:
+            errors.append("settings.jobs: must be at least 1")
+
+    # Validate font_dirs is a list of strings
+    if "font_dirs" in settings_data:
+        font_dirs = settings_data["font_dirs"]
+        if isinstance(font_dirs, list):
+            for i, d in enumerate(font_dirs):
+                if not isinstance(d, str):
+                    errors.append(
+                        f"settings.font_dirs[{i}]: expected string path, "
+                        f"got {type(d).__name__}"
+                    )
+
+    return errors
+
+
+def _validate_input_entry(i: int, entry: dict[str, Any]) -> list[str]:
+    """Validate a single input entry and return list of errors."""
+    errors: list[str] = []
+
+    # Check required path field
+    if "path" not in entry:
+        errors.append(f"inputs[{i}]: missing required 'path' field")
+        return errors  # Can't validate further without path
+
+    path_value = entry["path"]
+    if not isinstance(path_value, str):
+        errors.append(
+            f"inputs[{i}].path: expected string, got {type(path_value).__name__}"
+        )
+        return errors
+
+    path = Path(path_value)
+
+    # Determine if folder or file
+    if path.exists():
+        is_folder = path.is_dir()
+    else:
+        # Infer from trailing slash or extension
+        is_folder = path_value.endswith("/") or not path.suffix
+
+    if is_folder:
+        # Folder mode validation
+        if "output_dir" not in entry:
+            errors.append(
+                f"inputs[{i}]: folder mode requires 'output_dir' field "
+                f"(path '{path_value}' is a directory)"
+            )
+        elif not isinstance(entry["output_dir"], str):
+            errors.append(
+                f"inputs[{i}].output_dir: expected string, "
+                f"got {type(entry['output_dir']).__name__}"
+            )
+
+        if "suffix" in entry and not isinstance(entry["suffix"], str):
+            suffix_type = type(entry["suffix"]).__name__
+            errors.append(f"inputs[{i}].suffix: expected string, got {suffix_type}")
+
+        # Warn about file-mode fields in folder mode
+        if "output" in entry:
+            errors.append(
+                f"inputs[{i}]: 'output' field ignored in folder mode "
+                "(use 'output_dir' + 'suffix' instead)"
+            )
+    else:
+        # File mode validation
+        if "output" not in entry:
+            errors.append(
+                f"inputs[{i}]: file mode requires 'output' field "
+                f"(path '{path_value}' is a file)"
+            )
+        elif not isinstance(entry["output"], str):
+            errors.append(
+                f"inputs[{i}].output: expected string, "
+                f"got {type(entry['output']).__name__}"
+            )
+
+        # Warn about folder-mode fields in file mode
+        if "output_dir" in entry:
+            errors.append(
+                f"inputs[{i}]: 'output_dir' field ignored in file mode "
+                "(use 'output' for explicit output path)"
+            )
+
+    return errors
+
+
 def load_batch_config(config_path: Path) -> BatchConfig:
-    """Load and validate batch configuration from YAML file."""
+    """Load and validate batch configuration from YAML file.
+
+    Performs comprehensive validation:
+    - Type checking for all fields
+    - Value range validation (precision, thresholds, etc.)
+    - Required field validation for inputs
+    - Mode-specific validation (folder vs file mode)
+
+    Raises:
+        BatchConfigError: If validation fails, with detailed error messages.
+        FileNotFoundError: If config file doesn't exist.
+        yaml.YAMLError: If YAML parsing fails.
+    """
+    # Check file exists
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    # Parse YAML
     with open(config_path) as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise BatchConfigError(f"Invalid YAML syntax: {e}") from e
 
     if not data:
-        raise ValueError("Empty YAML config file")
+        raise BatchConfigError("Empty YAML config file")
 
-    # Parse settings
+    if not isinstance(data, dict):
+        raise BatchConfigError(
+            f"Config file must contain a YAML mapping, not {type(data).__name__}"
+        )
+
+    # Collect all validation errors
+    all_errors: list[str] = []
+
+    # Validate settings section
     settings_data = data.get("settings", {})
+    if settings_data is None:
+        settings_data = {}
+    if not isinstance(settings_data, dict):
+        all_errors.append(
+            f"settings: expected mapping, got {type(settings_data).__name__}"
+        )
+        settings_data = {}
+    else:
+        all_errors.extend(_validate_settings(settings_data))
+
+    # Validate inputs section
+    inputs_data = data.get("inputs")
+    if inputs_data is None:
+        all_errors.append("inputs: required field is missing")
+        inputs_data = []
+    elif not isinstance(inputs_data, list):
+        all_errors.append(f"inputs: expected list, got {type(inputs_data).__name__}")
+        inputs_data = []
+    elif len(inputs_data) == 0:
+        all_errors.append("inputs: at least one input entry is required")
+
+    # Validate each input entry
+    for i, entry in enumerate(inputs_data):
+        if not isinstance(entry, dict):
+            all_errors.append(
+                f"inputs[{i}]: expected mapping, got {type(entry).__name__}"
+            )
+            continue
+        all_errors.extend(_validate_input_entry(i, entry))
+
+    # Validate log_file
+    log_file_value = data.get("log_file")
+    if log_file_value is not None and not isinstance(log_file_value, str):
+        all_errors.append(
+            f"log_file: expected string, got {type(log_file_value).__name__}"
+        )
+
+    # If there are errors, raise with all of them
+    if all_errors:
+        error_msg = "Batch config validation failed:\n" + "\n".join(
+            f"  - {e}" for e in all_errors
+        )
+        raise BatchConfigError(error_msg)
+
+    # Build validated config objects
     settings = BatchSettings(
         precision=settings_data.get("precision", 6),
-        preserve_styles=settings_data.get("preserve_styles", False),
-        system_fonts_only=settings_data.get("system_fonts_only", False),
+        preserve_styles=bool(settings_data.get("preserve_styles", False)),
+        system_fonts_only=bool(settings_data.get("system_fonts_only", False)),
         font_dirs=settings_data.get("font_dirs", []),
-        no_remote_fonts=settings_data.get("no_remote_fonts", False),
-        no_size_limit=settings_data.get("no_size_limit", False),
-        auto_download=settings_data.get("auto_download", False),
-        validate=settings_data.get("validate", False),
-        verify=settings_data.get("verify", False),
+        no_remote_fonts=bool(settings_data.get("no_remote_fonts", False)),
+        no_size_limit=bool(settings_data.get("no_size_limit", False)),
+        auto_download=bool(settings_data.get("auto_download", False)),
+        validate=bool(settings_data.get("validate", False)),
+        verify=bool(settings_data.get("verify", False)),
         verify_pixel_threshold=settings_data.get("verify_pixel_threshold", 10),
-        verify_image_threshold=settings_data.get("verify_image_threshold", 5.0),
+        verify_image_threshold=float(settings_data.get("verify_image_threshold", 5.0)),
         jobs=settings_data.get("jobs", 4),
-        continue_on_error=settings_data.get("continue_on_error", True),
+        continue_on_error=bool(settings_data.get("continue_on_error", True)),
     )
 
-    # Parse inputs
-    inputs_data = data.get("inputs", [])
-    if not inputs_data:
-        raise ValueError("No inputs specified in YAML config")
-
+    # Build input entries (already validated above)
     inputs: list[InputEntry] = []
-    for i, entry in enumerate(inputs_data):
-        if "path" not in entry:
-            raise ValueError(f"Input entry {i} missing 'path' field")
+    for entry in inputs_data:
+        if not isinstance(entry, dict) or "path" not in entry:
+            continue
 
         path = Path(entry["path"])
 
-        # Auto-detect folder vs file
+        # Determine if folder or file
         if path.exists():
             is_folder = path.is_dir()
         else:
-            # If doesn't exist yet, infer from trailing slash or extension
             is_folder = str(entry["path"]).endswith("/") or not path.suffix
 
         if is_folder:
-            # Folder mode: requires output_dir and suffix
-            if "output_dir" not in entry:
-                raise ValueError(
-                    f"Input entry {i} is a folder but missing 'output_dir'"
-                )
             inputs.append(
                 InputEntry(
                     path=path,
@@ -142,9 +565,6 @@ def load_batch_config(config_path: Path) -> BatchConfig:
                 )
             )
         else:
-            # File mode: requires output
-            if "output" not in entry:
-                raise ValueError(f"Input entry {i} is a file but missing 'output'")
             inputs.append(
                 InputEntry(
                     path=path,
@@ -161,12 +581,12 @@ def load_batch_config(config_path: Path) -> BatchConfig:
 
 def find_svg_files_with_text(folder: Path) -> list[Path]:
     """Find all SVG files in folder that contain text elements."""
-    from svg_text2path.svg.parser import find_text_elements, parse_svg_file
+    from svg_text2path.svg.parser import find_text_elements, parse_svg
 
     svg_files = []
     for svg_path in folder.glob("*.svg"):
         try:
-            tree = parse_svg_file(svg_path)
+            tree = parse_svg(svg_path)
             root = tree.getroot()
             if root is not None:
                 text_elements = find_text_elements(root)
@@ -239,6 +659,50 @@ def run_verification(
 def batch() -> None:
     """Batch processing commands for multiple SVG files."""
     pass
+
+
+@batch.command("template")
+@click.argument(
+    "output_file",
+    type=click.Path(path_type=Path),
+    default="batch_config.yaml",
+)
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Overwrite existing file without prompting",
+)
+def batch_template(output_file: Path, force: bool) -> None:
+    """Generate a YAML configuration template for batch conversion.
+
+    OUTPUT_FILE: Path for the generated template (default: batch_config.yaml)
+
+    The template includes all available settings with extensive comments
+    explaining each option, its default value, and usage examples.
+
+    \b
+    Examples:
+      text2path batch template                    # Creates batch_config.yaml
+      text2path batch template my_batch.yaml      # Creates my_batch.yaml
+      text2path batch template config.yaml -f     # Overwrite if exists
+    """
+    if (
+        output_file.exists()
+        and not force
+        and not click.confirm(f"File '{output_file}' exists. Overwrite?")
+    ):
+        console.print("[yellow]Aborted.[/yellow]")
+        return
+
+    output_file.write_text(BATCH_CONFIG_TEMPLATE)
+    console.print(f"[green]Template created:[/green] {output_file}")
+    console.print()
+    console.print("[dim]Edit the template to configure your batch conversion,[/dim]")
+    console.print("[dim]then run:[/dim]")
+    console.print(f"  text2path convert --batch {output_file}")
+    console.print("[dim]or:[/dim]")
+    console.print(f"  text2path batch convert {output_file}")
 
 
 @batch.command("convert")
