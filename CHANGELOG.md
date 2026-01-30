@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-01-30
+
+### Added
+
+- **SVG validation**: `--validate` CLI flag validates input/output SVG using svg-matrix via Bun
+  - New `svg_text2path/tools/svg_validator.py` module
+  - `validate_svg` parameter on `Text2PathConverter`
+  - `input_valid`, `output_valid`, `validation_issues` fields on `ConversionResult`
+- **Auto font download**: `--auto-download` CLI flag downloads missing fonts automatically
+  - New `svg_text2path/fonts/downloader.py` module
+  - Uses fontget (primary) or fnt (fallback) tools
+  - `auto_download_fonts` parameter on `Text2PathConverter`
+  - `auto_download` parameter on `FontCache.get_font()`
+- **Offline mode support**: Network-dependent features gracefully degrade when offline
+  - Font auto-download skips with "no network (offline)" message
+  - SVG validation skips with "Validation skipped (offline mode)" message
+  - `is_network_available()` utility function in validator and downloader modules
+
+### Fixed
+
+- **Font style fallback**: Fixed italic/oblique font matching when weight != 400
+  - fontconfig patterns now include slant suffix for proper style resolution
+
 ## [0.4.2] - 2026-01-26
 
 ### Added

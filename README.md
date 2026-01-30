@@ -31,8 +31,11 @@ When you embed text in SVG files, the viewer must have the correct fonts install
 - **Unicode BiDi** - RTL languages (Arabic, Hebrew) rendered correctly
 - **TextPath support** - Text along paths with tangent-based placement
 - **Strict font matching** - Fails on missing fonts (no silent fallbacks)
+- **Auto font download** - Missing fonts downloaded automatically via fontget/fnt
+- **SVG validation** - Input/output validation via svg-matrix
 - **Multi-format input** - SVG files, HTML, CSS, URLs, Python/JS code, Markdown, RST, ePub
 - **Visual diff tools** - Pixel-perfect comparison via svg-bbox
+- **Offline mode** - Graceful degradation when network is unavailable
 - **Cross-platform** - Works on macOS, Linux, and Windows
 
 ## Installation
@@ -195,6 +198,15 @@ text2path convert input.svg -o output.svg --precision 8
 
 # Convert large files that exceed default size limits
 text2path convert large_file.svgz -o output.svg --no-size-limit
+
+# Auto-download missing fonts (requires fontget or fnt)
+text2path convert input.svg -o output.svg --auto-download
+
+# Validate SVG structure (requires Bun)
+text2path convert input.svg -o output.svg --validate
+
+# Combine validation and auto-download
+text2path convert input.svg -o output.svg --auto-download --validate
 ```
 
 #### Supported Input Formats
@@ -363,11 +375,14 @@ converter = Text2PathConverter(
     precision=6,               # Path coordinate precision (1-12)
     preserve_styles=False,     # Keep style metadata on paths
     log_level="WARNING",       # Logging level
+    auto_download_fonts=False, # Auto-download missing fonts via fontget/fnt
+    validate_svg=False,        # Validate input/output SVG via svg-matrix
 )
 
 # Methods
 result = converter.convert_file(input_path, output_path)
-result = converter.convert_string(svg_content)
+output_svg = converter.convert_string(svg_content)
+output_svg, result = converter.convert_string(svg_content, return_result=True)
 element = converter.convert_element(text_element)
 ```
 
@@ -387,6 +402,10 @@ class ConversionResult:
     warnings: list[str]        # Warning messages
     text_count: int            # Number of text elements found
     path_count: int            # Number of paths generated
+    missing_fonts: list[str]   # Fonts that couldn't be resolved
+    input_valid: bool | None   # Input SVG validation result (if --validate)
+    output_valid: bool | None  # Output SVG validation result (if --validate)
+    validation_issues: list[str]  # SVG validation issues found
 ```
 
 ### FontCache
@@ -474,6 +493,27 @@ converter.convert_file(r"C:\Users\name\input.svg", "output.svg")
 converter.convert_file("C:\Users\name\input.svg", "output.svg")
 ```
 
+### Offline Mode
+
+When running without network connectivity (e.g., in containers or air-gapped environments):
+
+- **Font auto-download**: Skipped with message "Cannot download: no network (offline)"
+- **SVG validation**: Skipped with message "Validation skipped (offline mode)"
+
+The conversion itself works fully offline - only the optional features require network.
+
+```python
+# Works offline - core conversion doesn't need network
+converter = Text2PathConverter()
+result = converter.convert_file("input.svg", "output.svg")
+
+# These features gracefully degrade when offline:
+converter = Text2PathConverter(
+    auto_download_fonts=True,  # Skips download if no network
+    validate_svg=True,         # Skips validation if no network
+)
+```
+
 ## Requirements
 
 ### Python Dependencies
@@ -496,6 +536,9 @@ converter.convert_file("C:\Users\name\input.svg", "output.svg")
 | fontconfig | Enhanced font matching | `apt install fontconfig` |
 | Node.js | Chrome-based comparison | `brew install node` |
 | Inkscape | Reference rendering | `apt install inkscape` |
+| Bun | SVG validation via svg-matrix | `curl -fsSL https://bun.sh/install \| sh` |
+| fontget | Auto font download | `curl -fsSL https://raw.githubusercontent.com/Graphixa/FontGet/main/scripts/install.sh \| sh` |
+| fnt | Auto font download (fallback) | `brew install fnt` |
 
 ### Font Installation Tools (Recommended)
 
