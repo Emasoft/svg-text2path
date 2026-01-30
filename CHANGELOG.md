@@ -5,21 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-01-30
+
+### Changed
+
+- **Format selection defaults**: SVG format now enabled by default (`svg: true`)
+  - `formats` section is now optional - omitting it defaults to SVG only
+  - Other formats still require explicit opt-in
+  - Existing v0.4.7 configs continue to work unchanged
+
 ## [0.4.7] - 2026-01-30
 
 ### Added
 
-- **Explicit format selection for batch mode**: New `formats` YAML section requires explicit opt-in for each file type
+- **Explicit format selection for batch mode**: New `formats` YAML section for file type selection
   - All 12 formats configurable: svg, svgz, html, css, json, csv, markdown, python, javascript, rst, plaintext, epub
-  - All formats default to `false` - nothing converts without explicit enabling
   - Validation enforces at least one format must be enabled
   - Format handlers now used for all file types (not just SVG)
-
-### Changed
-
-- **Batch config YAML structure**: `formats` section is now required (breaking change)
-  - Existing configs need `formats: svg: true` added to continue working
-  - Template updated with full format selection section
 
 ### Fixed
 

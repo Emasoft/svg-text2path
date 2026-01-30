@@ -696,11 +696,11 @@ class TestInputEntry:
 class TestFormatSelection:
     """Tests for FormatSelection dataclass and validation."""
 
-    def test_default_all_disabled(self) -> None:
-        """FormatSelection defaults to all formats disabled."""
+    def test_default_svg_enabled(self) -> None:
+        """FormatSelection defaults to svg enabled, others disabled."""
         formats = FormatSelection()
 
-        assert formats.svg is False
+        assert formats.svg is True  # SVG enabled by default
         assert formats.svgz is False
         assert formats.html is False
         assert formats.css is False
@@ -713,10 +713,10 @@ class TestFormatSelection:
         assert formats.plaintext is False
         assert formats.epub is False
 
-    def test_missing_formats_section_raises(
+    def test_missing_formats_section_defaults_to_svg(
         self, tmp_path: Path, temp_svg_file: Path
     ) -> None:
-        """Config without formats section raises BatchConfigError."""
+        """Config without formats section defaults to svg only."""
         config_file = tmp_path / "no_formats.yaml"
         config_file.write_text(
             dedent(f"""
@@ -726,22 +726,33 @@ class TestFormatSelection:
         """)
         )
 
-        with pytest.raises(
-            BatchConfigError,
-            match="formats: required section is missing",
-        ):
-            load_batch_config(config_file)
+        config = load_batch_config(config_file)
 
-    def test_no_formats_enabled_raises(
+        # SVG should be enabled by default
+        assert config.settings.formats.svg is True
+        assert config.settings.formats.html is False
+        assert config.settings.formats.python is False
+
+    def test_all_formats_disabled_raises(
         self, tmp_path: Path, temp_svg_file: Path
     ) -> None:
-        """Config with no formats enabled raises BatchConfigError."""
-        config_file = tmp_path / "no_formats_enabled.yaml"
+        """Config with all formats explicitly disabled raises BatchConfigError."""
+        config_file = tmp_path / "all_formats_disabled.yaml"
         config_file.write_text(
             dedent(f"""
             formats:
               svg: false
+              svgz: false
               html: false
+              css: false
+              json: false
+              csv: false
+              markdown: false
+              python: false
+              javascript: false
+              rst: false
+              plaintext: false
+              epub: false
             inputs:
               - path: {temp_svg_file}
                 output: out.svg

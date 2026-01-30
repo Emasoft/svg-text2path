@@ -322,10 +322,10 @@ class FormatSelection:
     """File formats to include in batch conversion.
 
     Only formats explicitly set to True will be processed.
-    All formats default to False for safety - user must opt-in.
+    SVG is enabled by default; all other formats require explicit opt-in.
     """
 
-    svg: bool = False  # .svg files
+    svg: bool = True  # .svg files (enabled by default)
     svgz: bool = False  # .svgz compressed files
     html: bool = False  # .html, .htm, .xhtml files
     css: bool = False  # .css files (data URIs)
@@ -651,20 +651,16 @@ def load_batch_config(config_path: Path) -> BatchConfig:
     else:
         all_errors.extend(_validate_settings(settings_data))
 
-    # Validate formats section (required)
-    formats_data = data.get("formats")
+    # Validate formats section (optional - defaults to svg only)
+    formats_data = data.get("formats", {})
     if formats_data is None:
-        all_errors.append(
-            "formats: required section is missing - "
-            "you must explicitly enable file formats"
-        )
         formats_data = {}
-    elif not isinstance(formats_data, dict):
+    if not isinstance(formats_data, dict):
         all_errors.append(
             f"formats: expected mapping, got {type(formats_data).__name__}"
         )
         formats_data = {}
-    else:
+    elif formats_data:  # Only validate if formats section provided
         all_errors.extend(_validate_formats(formats_data))
 
     # Validate inputs section
@@ -701,9 +697,9 @@ def load_batch_config(config_path: Path) -> BatchConfig:
         )
         raise BatchConfigError(error_msg)
 
-    # Build format selection
+    # Build format selection (svg defaults to True, others to False)
     format_selection = FormatSelection(
-        svg=bool(formats_data.get("svg", False)),
+        svg=bool(formats_data.get("svg", True)),  # Default: enabled
         svgz=bool(formats_data.get("svgz", False)),
         html=bool(formats_data.get("html", False)),
         css=bool(formats_data.get("css", False)),
