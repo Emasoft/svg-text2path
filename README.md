@@ -382,16 +382,6 @@ text2path batch template my_batch.yaml
 text2path batch convert my_batch.yaml
 ```
 
-### Why Use Batch Mode?
-
-| Use Case | Benefit |
-|----------|---------|
-| **Multiple folders** | Process different directories with different output settings |
-| **Verification** | Automatically compare original vs converted visually |
-| **Parallel processing** | Speed up conversions on multi-core systems |
-| **CI/CD integration** | JSON log reports for automated pipelines |
-| **Reproducible builds** | Version-controlled configuration files |
-
 ### Template Structure
 
 The generated template is extensively documented with:

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-01-30
+
+### Added
+
+- **YAML config validation**: Comprehensive validation for batch config files
+  - Type checking for all settings fields
+  - Value range validation (precision 1-10, thresholds, jobs ≥1)
+  - Required field enforcement with detailed error messages
+  - `BatchConfigError` exception with all validation errors listed
+
+- **Template generation**: `text2path batch template [output.yaml]`
+  - Generates extensively-commented YAML configuration template
+  - Quick-start guide with 3-step workflow
+  - All settings documented with defaults and examples
+  - `--force` flag to overwrite existing files
+
+### Changed
+
+- Improved batch processing documentation in README
+- Enhanced YAML template with ASCII diagrams and tips section
+
 ## [0.4.4] - 2026-01-30
 
 ### Added

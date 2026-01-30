@@ -79,3 +79,24 @@ Thumbs.db
 .env
 .venv/
 venv/
+
+# Tool caches and state
+.claude/
+.serena/
+.dmypy.json
+.testmondata
+.tmp-compare/
+
+# Debug/temp files in root
+_debug*.svg
+test_*.png
+diffs/
+
+# Sample development files
+samples/_REFERENCE*.svg
+samples/out_bbox.json
+samples/reference_objects/
+samples/test_*.svg
+samples/text*_conv*.svg
+samples/text*_orig*.svg
+samples/**/*.html
