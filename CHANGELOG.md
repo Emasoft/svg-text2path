@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--verify-image-threshold` sets max acceptable diff percentage (default: 5.0%)
   - Uses `bunx sbb-compare` for pixel-accurate visual comparison
 
+- **YAML batch configuration**: `text2path batch convert config.yaml`
+  - Full YAML config file for batch conversions
+  - All CLI settings configurable in YAML (precision, verify, auto_download, etc.)
+  - Mixed input modes: folders and individual files
+  - Folder mode: auto-detects directories, processes all SVGs with text elements
+  - File mode: specify exact input/output paths
+  - JSON log report with conversion details (success, skipped, errors, verification)
+  - See `samples/batch_config_example.yaml` for full configuration reference
+
 ## [0.4.3] - 2026-01-30
 
 ### Added

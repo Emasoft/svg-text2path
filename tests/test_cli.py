@@ -102,28 +102,34 @@ class TestBatchCommand:
         assert "compare" in result.output
         assert "regression" in result.output
 
-    def test_batch_convert_with_output_dir_option(
+    def test_batch_convert_with_yaml_config(
         self, runner: CliRunner, temp_svg_file: Path, tmp_path: Path
     ) -> None:
-        """Batch convert --output-dir option specifies output directory."""
+        """Batch convert accepts YAML config file."""
         output_dir = tmp_path / "batch_output"
-        result = runner.invoke(
-            cli,
-            ["batch", "convert", str(temp_svg_file), "--output-dir", str(output_dir)],
-        )
-        # Check that --output-dir is parsed (no argument errors)
-        assert "Error: Invalid value for '--output-dir'" not in result.output
+        config_file = tmp_path / "batch_config.yaml"
+        config_content = f"""
+settings:
+  precision: 6
+  continue_on_error: true
+
+inputs:
+  - path: {temp_svg_file}
+    output: {output_dir / "converted.svg"}
+
+log_file: {tmp_path / "batch_log.json"}
+"""
+        config_file.write_text(config_content)
+        result = runner.invoke(cli, ["batch", "convert", str(config_file)])
         # Exit code may be 0 or 1 depending on font availability
         assert result.exit_code in (0, 1), f"Unexpected exit: {result.output}"
 
-    def test_batch_convert_requires_output_dir(
-        self, runner: CliRunner, temp_svg_file: Path
-    ) -> None:
-        """Batch convert fails without required --output-dir option."""
-        result = runner.invoke(cli, ["batch", "convert", str(temp_svg_file)])
+    def test_batch_convert_requires_config_file(self, runner: CliRunner) -> None:
+        """Batch convert fails without required config file argument."""
+        result = runner.invoke(cli, ["batch", "convert"])
         assert result.exit_code != 0
-        # Should indicate missing required option
-        assert "Missing option" in result.output or "--output-dir" in result.output
+        # Should indicate missing required argument
+        assert "Missing argument" in result.output or "CONFIG_FILE" in result.output
 
 
 class TestFontsCommand:

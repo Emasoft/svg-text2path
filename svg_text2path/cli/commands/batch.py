@@ -5,18 +5,234 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import subprocess
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import click
+import yaml
 from rich.console import Console
 from rich.progress import Progress
 from rich.table import Table
 
-from svg_text2path import ConversionResult, Text2PathConverter
+from svg_text2path import Text2PathConverter
 from svg_text2path.config import Config
 
 console = Console()
+
+
+# ---------------------------------------------------------------------------
+# Batch Config Schema
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BatchSettings:
+    """Settings that apply to all conversions in the batch."""
+
+    precision: int = 6
+    preserve_styles: bool = False
+    system_fonts_only: bool = False
+    font_dirs: list[str] = field(default_factory=list)
+    no_remote_fonts: bool = False
+    no_size_limit: bool = False
+    auto_download: bool = False
+    validate: bool = False
+    verify: bool = False
+    verify_pixel_threshold: int = 10
+    verify_image_threshold: float = 5.0
+    jobs: int = 4
+    continue_on_error: bool = True
+
+
+@dataclass
+class InputEntry:
+    """A single input entry - either a file or folder."""
+
+    path: Path
+    is_folder: bool
+    # For folders: output_dir + suffix
+    output_dir: Path | None = None
+    suffix: str = "_text2path"
+    # For files: full output path
+    output: Path | None = None
+
+
+@dataclass
+class BatchConfig:
+    """Complete batch configuration from YAML."""
+
+    settings: BatchSettings
+    inputs: list[InputEntry]
+    log_file: Path
+
+
+@dataclass
+class ConversionLogEntry:
+    """Log entry for a single file conversion."""
+
+    input_path: str
+    output_path: str
+    status: str  # "success", "skipped", "error"
+    reason: str = ""
+    text_elements: int = 0
+    path_elements: int = 0
+    diff_percent: float | None = None
+    verify_passed: bool | None = None
+
+
+def load_batch_config(config_path: Path) -> BatchConfig:
+    """Load and validate batch configuration from YAML file."""
+    with open(config_path) as f:
+        data = yaml.safe_load(f)
+
+    if not data:
+        raise ValueError("Empty YAML config file")
+
+    # Parse settings
+    settings_data = data.get("settings", {})
+    settings = BatchSettings(
+        precision=settings_data.get("precision", 6),
+        preserve_styles=settings_data.get("preserve_styles", False),
+        system_fonts_only=settings_data.get("system_fonts_only", False),
+        font_dirs=settings_data.get("font_dirs", []),
+        no_remote_fonts=settings_data.get("no_remote_fonts", False),
+        no_size_limit=settings_data.get("no_size_limit", False),
+        auto_download=settings_data.get("auto_download", False),
+        validate=settings_data.get("validate", False),
+        verify=settings_data.get("verify", False),
+        verify_pixel_threshold=settings_data.get("verify_pixel_threshold", 10),
+        verify_image_threshold=settings_data.get("verify_image_threshold", 5.0),
+        jobs=settings_data.get("jobs", 4),
+        continue_on_error=settings_data.get("continue_on_error", True),
+    )
+
+    # Parse inputs
+    inputs_data = data.get("inputs", [])
+    if not inputs_data:
+        raise ValueError("No inputs specified in YAML config")
+
+    inputs: list[InputEntry] = []
+    for i, entry in enumerate(inputs_data):
+        if "path" not in entry:
+            raise ValueError(f"Input entry {i} missing 'path' field")
+
+        path = Path(entry["path"])
+
+        # Auto-detect folder vs file
+        if path.exists():
+            is_folder = path.is_dir()
+        else:
+            # If doesn't exist yet, infer from trailing slash or extension
+            is_folder = str(entry["path"]).endswith("/") or not path.suffix
+
+        if is_folder:
+            # Folder mode: requires output_dir and suffix
+            if "output_dir" not in entry:
+                raise ValueError(
+                    f"Input entry {i} is a folder but missing 'output_dir'"
+                )
+            inputs.append(
+                InputEntry(
+                    path=path,
+                    is_folder=True,
+                    output_dir=Path(entry["output_dir"]),
+                    suffix=entry.get("suffix", "_text2path"),
+                )
+            )
+        else:
+            # File mode: requires output
+            if "output" not in entry:
+                raise ValueError(f"Input entry {i} is a file but missing 'output'")
+            inputs.append(
+                InputEntry(
+                    path=path,
+                    is_folder=False,
+                    output=Path(entry["output"]),
+                )
+            )
+
+    # Log file path
+    log_file = Path(data.get("log_file", "batch_conversion_log.json"))
+
+    return BatchConfig(settings=settings, inputs=inputs, log_file=log_file)
+
+
+def find_svg_files_with_text(folder: Path) -> list[Path]:
+    """Find all SVG files in folder that contain text elements."""
+    from svg_text2path.svg.parser import find_text_elements, parse_svg_file
+
+    svg_files = []
+    for svg_path in folder.glob("*.svg"):
+        try:
+            tree = parse_svg_file(svg_path)
+            root = tree.getroot()
+            if root is not None:
+                text_elements = find_text_elements(root)
+                if text_elements:
+                    svg_files.append(svg_path)
+        except Exception:
+            # Skip files that can't be parsed
+            pass
+    return sorted(svg_files)
+
+
+def run_verification(
+    original: Path,
+    converted: Path,
+    pixel_threshold: int,
+    image_threshold: float,
+) -> tuple[float | None, bool | None]:
+    """Run sbb-compare verification and return (diff_percent, passed)."""
+    import shutil
+
+    bun_path = shutil.which("bun")
+    if not bun_path:
+        return None, None
+
+    # Use original's parent as CWD
+    cwd = original.parent
+    orig_rel = original.name
+    try:
+        conv_rel = converted.relative_to(cwd)
+    except ValueError:
+        conv_rel = converted
+
+    cmd = [
+        "bunx",
+        "sbb-compare",
+        "--quiet",
+        "--headless",
+        "--threshold",
+        str(pixel_threshold),
+        str(orig_rel),
+        str(conv_rel),
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=cwd,
+        )
+        output = result.stdout.strip()
+        clean_output = output.replace("%", "").strip()
+        if clean_output:
+            diff_pct = float(clean_output)
+            passed = diff_pct <= image_threshold
+            return diff_pct, passed
+    except Exception:
+        pass
+
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Batch Commands
+# ---------------------------------------------------------------------------
 
 
 @click.group()
@@ -26,111 +242,311 @@ def batch() -> None:
 
 
 @batch.command("convert")
-@click.argument("inputs", nargs=-1, type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--output-dir",
-    "-o",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Output directory",
-)
-@click.option(
-    "--batch-file",
-    type=click.Path(exists=True, path_type=Path),
-    help="File containing list of inputs",
-)
-@click.option(
-    "-p", "--precision", type=int, default=6, help="Path coordinate precision"
-)
-@click.option("--suffix", default="_text2path", help="Output filename suffix")
-@click.option("-j", "--jobs", type=int, default=4, help="Parallel jobs")
-@click.option("--continue-on-error", is_flag=True, help="Continue processing on errors")
+@click.argument("config_file", type=click.Path(exists=True, path_type=Path))
 @click.pass_context
 def batch_convert(
     ctx: click.Context,
-    inputs: tuple[Path, ...],
-    output_dir: Path,
-    batch_file: Path | None,
-    precision: int,
-    suffix: str,
-    jobs: int,
-    continue_on_error: bool,
+    config_file: Path,
 ) -> None:
-    """Convert multiple SVG files to paths.
+    """Convert multiple SVG files using YAML configuration.
 
-    INPUTS: Paths to SVG files (supports glob patterns via shell).
+    CONFIG_FILE: Path to YAML configuration file.
+
+    \b
+    YAML config structure:
+      settings:           # Conversion settings (all optional)
+        precision: 6
+        preserve_styles: false
+        system_fonts_only: false
+        font_dirs: []
+        no_remote_fonts: false
+        no_size_limit: false
+        auto_download: false
+        validate: false
+        verify: false
+        verify_pixel_threshold: 10
+        verify_image_threshold: 5.0
+        jobs: 4
+        continue_on_error: true
+
+      inputs:             # List of files or folders to convert
+        # Folder mode (auto-detected when path is a directory)
+        - path: samples/icons/
+          output_dir: converted/icons/
+          suffix: _converted
+
+        # File mode (auto-detected when path is a file)
+        - path: samples/logo.svg
+          output: converted/brand/company_logo.svg
+
+      log_file: batch_log.json  # Optional, defaults to batch_conversion_log.json
+
+    \b
+    Example:
+      text2path batch convert batch_config.yaml
     """
-    config = ctx.obj.get("config", Config.load())
+    app_config = ctx.obj.get("config", Config.load())
     log_level = ctx.obj.get("log_level", "WARNING")
 
-    # Collect all input files
-    all_inputs: list[Path] = list(inputs)
+    # Load batch config
+    try:
+        batch_cfg = load_batch_config(config_file)
+    except Exception as e:
+        console.print(f"[red]Error loading config:[/red] {e}")
+        raise SystemExit(1) from None
 
-    if batch_file:
-        with open(batch_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    all_inputs.append(Path(line))
+    settings = batch_cfg.settings
 
-    if not all_inputs:
-        console.print("[red]Error:[/red] No input files specified")
-        raise SystemExit(1)
-
-    # Ensure output directory exists
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Apply config settings to app config
+    if settings.system_fonts_only:
+        app_config.fonts.system_only = True
+    if settings.font_dirs:
+        app_config.fonts.custom_dirs = [Path(d) for d in settings.font_dirs]
+    if settings.no_remote_fonts:
+        app_config.fonts.remote = False
+    if settings.no_size_limit:
+        app_config.security.ignore_size_limits = True
 
     # Create converter
     converter = Text2PathConverter(
-        precision=precision,
+        precision=settings.precision,
+        preserve_styles=settings.preserve_styles,
         log_level=log_level,
-        config=config,
+        config=app_config,
+        auto_download_fonts=settings.auto_download,
+        validate_svg=settings.validate,
     )
 
-    results: list[ConversionResult] = []
-    success_count = 0
-    error_count = 0
+    # Collect all file pairs (input, output)
+    file_pairs: list[tuple[Path, Path]] = []
 
-    def process_file(input_path: Path) -> ConversionResult:
-        output_path = output_dir / f"{input_path.stem}{suffix}.svg"
-        return converter.convert_file(input_path, output_path)
+    console.print("[bold]Collecting input files...[/bold]")
+
+    for entry in batch_cfg.inputs:
+        if entry.is_folder:
+            if not entry.path.exists():
+                console.print(
+                    f"[yellow]Warning:[/yellow] Folder not found: {entry.path}"
+                )
+                continue
+
+            # Find SVG files with text elements
+            svg_files = find_svg_files_with_text(entry.path)
+            console.print(
+                f"  [dim]{entry.path}[/dim]: {len(svg_files)} SVG files with text"
+            )
+
+            # Ensure output dir exists
+            if entry.output_dir:
+                entry.output_dir.mkdir(parents=True, exist_ok=True)
+
+            for svg_file in svg_files:
+                out_name = f"{svg_file.stem}{entry.suffix}.svg"
+                out_path = entry.output_dir / out_name if entry.output_dir else None
+                if out_path:
+                    file_pairs.append((svg_file, out_path))
+        else:
+            # Single file
+            if not entry.path.exists():
+                console.print(f"[yellow]Warning:[/yellow] File not found: {entry.path}")
+                continue
+
+            if entry.output:
+                # Ensure output directory exists
+                entry.output.parent.mkdir(parents=True, exist_ok=True)
+                file_pairs.append((entry.path, entry.output))
+
+    if not file_pairs:
+        console.print("[red]Error:[/red] No valid input files found")
+        raise SystemExit(1)
+
+    console.print(f"\n[bold]Converting {len(file_pairs)} files...[/bold]")
+
+    # Process files
+    log_entries: list[ConversionLogEntry] = []
+    success_count = 0
+    skipped_count = 0
+    error_count = 0
+    verify_pass_count = 0
+    verify_fail_count = 0
+
+    def process_file(pair: tuple[Path, Path]) -> ConversionLogEntry:
+        input_path, output_path = pair
+
+        try:
+            result = converter.convert_file(input_path, output_path)
+
+            if result.success:
+                # Check if any text was converted
+                if result.text_count == 0:
+                    return ConversionLogEntry(
+                        input_path=str(input_path),
+                        output_path=str(output_path),
+                        status="skipped",
+                        reason="No text elements found",
+                    )
+
+                log_entry = ConversionLogEntry(
+                    input_path=str(input_path),
+                    output_path=str(output_path),
+                    status="success",
+                    text_elements=result.text_count,
+                    path_elements=result.path_count,
+                )
+
+                # Run verification if enabled
+                if settings.verify:
+                    diff_pct, passed = run_verification(
+                        input_path,
+                        output_path,
+                        settings.verify_pixel_threshold,
+                        settings.verify_image_threshold,
+                    )
+                    log_entry.diff_percent = diff_pct
+                    log_entry.verify_passed = passed
+
+                return log_entry
+            else:
+                return ConversionLogEntry(
+                    input_path=str(input_path),
+                    output_path=str(output_path),
+                    status="error",
+                    reason=str(result.errors),
+                )
+        except PermissionError as e:
+            return ConversionLogEntry(
+                input_path=str(input_path),
+                output_path=str(output_path),
+                status="error",
+                reason=f"Permission denied: {e}",
+            )
+        except OSError as e:
+            return ConversionLogEntry(
+                input_path=str(input_path),
+                output_path=str(output_path),
+                status="error",
+                reason=f"I/O error: {e}",
+            )
+        except Exception as e:
+            return ConversionLogEntry(
+                input_path=str(input_path),
+                output_path=str(output_path),
+                status="error",
+                reason=str(e),
+            )
 
     with Progress(console=console) as progress:
-        task = progress.add_task("[green]Converting...", total=len(all_inputs))
+        task = progress.add_task("[green]Converting...", total=len(file_pairs))
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-            future_to_path = {executor.submit(process_file, p): p for p in all_inputs}
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=settings.jobs
+        ) as executor:
+            future_to_pair = {
+                executor.submit(process_file, pair): pair for pair in file_pairs
+            }
 
-            for future in concurrent.futures.as_completed(future_to_path):
-                input_path = future_to_path[future]
+            for future in concurrent.futures.as_completed(future_to_pair):
+                pair = future_to_pair[future]
                 try:
-                    result = future.result()
-                    results.append(result)
-                    if result.success:
+                    log_entry = future.result()
+                    log_entries.append(log_entry)
+
+                    if log_entry.status == "success":
                         success_count += 1
+                        if log_entry.verify_passed is True:
+                            verify_pass_count += 1
+                        elif log_entry.verify_passed is False:
+                            verify_fail_count += 1
+                    elif log_entry.status == "skipped":
+                        skipped_count += 1
                     else:
                         error_count += 1
-                        if not continue_on_error:
+                        if not settings.continue_on_error:
                             console.print(
-                                f"[red]Error in {input_path}:[/red] {result.errors}"
+                                f"[red]Error in {pair[0]}:[/red] {log_entry.reason}"
                             )
                             raise SystemExit(1)
                 except Exception as e:
                     error_count += 1
-                    if not continue_on_error:
-                        console.print(f"[red]Error processing {input_path}:[/red] {e}")
+                    log_entries.append(
+                        ConversionLogEntry(
+                            input_path=str(pair[0]),
+                            output_path=str(pair[1]),
+                            status="error",
+                            reason=str(e),
+                        )
+                    )
+                    if not settings.continue_on_error:
+                        console.print(f"[red]Error processing {pair[0]}:[/red] {e}")
                         raise SystemExit(1) from None
                 finally:
                     progress.advance(task)
 
-    # Summary
-    console.print()
-    console.print("[bold]Batch convert complete:[/bold]")
-    console.print(f"  [green]Success:[/green] {success_count}")
-    console.print(f"  [red]Failed:[/red] {error_count}")
-    console.print(f"  [blue]Output:[/blue] {output_dir}")
+    # Write log file
+    log_data = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "config_file": str(config_file),
+        "settings": {
+            "precision": settings.precision,
+            "preserve_styles": settings.preserve_styles,
+            "auto_download": settings.auto_download,
+            "validate": settings.validate,
+            "verify": settings.verify,
+            "verify_pixel_threshold": settings.verify_pixel_threshold,
+            "verify_image_threshold": settings.verify_image_threshold,
+        },
+        "summary": {
+            "total": len(file_pairs),
+            "success": success_count,
+            "skipped": skipped_count,
+            "errors": error_count,
+            "verify_passed": verify_pass_count if settings.verify else None,
+            "verify_failed": verify_fail_count if settings.verify else None,
+        },
+        "files": [
+            {
+                "input": e.input_path,
+                "output": e.output_path,
+                "status": e.status,
+                "reason": e.reason if e.reason else None,
+                "text_elements": e.text_elements if e.text_elements else None,
+                "path_elements": e.path_elements if e.path_elements else None,
+                "diff_percent": e.diff_percent,
+                "verify_passed": e.verify_passed,
+            }
+            for e in log_entries
+        ],
+    }
 
-    if error_count > 0 and not continue_on_error:
+    batch_cfg.log_file.write_text(json.dumps(log_data, indent=2))
+
+    # Summary table
+    console.print()
+    table = Table(title="Batch Conversion Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", justify="right")
+
+    table.add_row("Total files", str(len(file_pairs)))
+    table.add_row("[green]Converted[/green]", str(success_count))
+    table.add_row("[yellow]Skipped (no text)[/yellow]", str(skipped_count))
+    table.add_row("[red]Errors[/red]", str(error_count))
+
+    if settings.verify:
+        table.add_row("", "")
+        table.add_row("[green]Verify passed[/green]", str(verify_pass_count))
+        table.add_row("[red]Verify failed[/red]", str(verify_fail_count))
+
+    console.print(table)
+    console.print()
+    console.print(f"[blue]Log file:[/blue] {batch_cfg.log_file}")
+
+    if error_count > 0:
+        console.print(
+            f"\n[yellow]Warning:[/yellow] {error_count} files had errors. "
+            f"Check {batch_cfg.log_file} for details."
+        )
+
+    if error_count > 0 and not settings.continue_on_error:
         raise SystemExit(1)
 
 
@@ -518,7 +934,7 @@ def batch_regression(
             result_map[name] = float(diff)
 
     # Load existing registry
-    registry_data: list[dict] = []
+    registry_data: list[dict[str, Any]] = []
     if registry.exists():
         try:
             registry_data = json.loads(registry.read_text())

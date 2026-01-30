@@ -1,0 +1,44 @@
+# Example batch configuration for text2path
+# Usage: text2path batch convert batch_config_example.yaml
+
+# Conversion settings (apply to all files)
+settings:
+  precision: 6              # Path coordinate decimal places
+  preserve_styles: false    # Keep style metadata on paths
+  system_fonts_only: false  # Only use system fonts
+  font_dirs: []             # Additional font directories
+  no_remote_fonts: false    # Disable remote font fetching
+  no_size_limit: false      # Bypass file size limits
+  auto_download: false      # Auto-download missing fonts via fontget/fnt
+  validate: false           # Validate SVG using svg-matrix
+  verify: false             # Verify conversion using sbb-compare
+  verify_pixel_threshold: 10   # Pixel color diff sensitivity (1-255)
+  verify_image_threshold: 5.0  # Max acceptable diff percentage
+  jobs: 4                   # Parallel conversion jobs
+  continue_on_error: true   # Continue on errors vs fail-fast
+
+# Input sources - mix of folders and individual files
+inputs:
+  # Folder mode: auto-detected when path is a directory
+  # Requires: output_dir (where to save) and suffix (filename suffix)
+  # Only SVG files containing text/tspan/textPath elements are processed
+  - path: samples/
+    output_dir: converted/samples/
+    suffix: _converted
+
+  # File mode: auto-detected when path is a file
+  # Requires: output (full path including filename)
+  # - path: assets/logo.svg
+  #   output: dist/logo_paths.svg
+
+  # Multiple folders can be listed
+  # - path: icons/small/
+  #   output_dir: dist/icons/small/
+  #   suffix: _paths
+
+  # - path: icons/large/
+  #   output_dir: dist/icons/large/
+  #   suffix: _paths
+
+# Output log file (defaults to batch_conversion_log.json)
+log_file: batch_conversion_log.json
