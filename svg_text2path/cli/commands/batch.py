@@ -27,19 +27,29 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 BATCH_CONFIG_TEMPLATE = """\
-# =========================================================================
+# =============================================================================
 # SVG Text2Path - Batch Conversion Configuration
 # =============================================================================
 #
-# This YAML file configures batch conversion of SVG files from text elements
-# to vector path outlines.
+# Convert multiple SVG files from text elements to vector path outlines in one
+# operation. All text is converted to paths that render identically on any
+# system without requiring fonts.
 #
-# Usage:
-#   text2path convert --batch config.yaml
+# QUICK START
+# -----------
+# 1. Edit the 'inputs' section below (required)
+# 2. Optionally adjust settings (all have sensible defaults)
+# 3. Run: text2path batch convert <this-file>.yaml
+#
+# USAGE
+# -----
 #   text2path batch convert config.yaml
 #
-# All settings are optional except 'inputs' which must list at least one
-# file or folder. Missing or commented-out settings use their default values.
+# WHAT YOU NEED TO CONFIGURE
+# --------------------------
+# - 'inputs' section: REQUIRED - specify files/folders to convert
+# - 'settings' section: OPTIONAL - all defaults work well for most cases
+# - 'log_file': OPTIONAL - where to save the conversion report
 #
 # =============================================================================
 
@@ -155,77 +165,118 @@ settings:
 
 
 # -----------------------------------------------------------------------------
-# INPUT FILES AND FOLDERS
+# INPUT FILES AND FOLDERS (REQUIRED)
 # -----------------------------------------------------------------------------
-# REQUIRED: At least one input must be specified.
+# You MUST specify at least one input. Remove the example and add your own.
 #
-# Two input modes are supported:
+# TWO INPUT MODES (auto-detected):
 #
-# 1. FOLDER MODE - Process all SVGs with text in a directory
-#    Auto-detected when 'path' is a directory.
-#    Required fields: path, output_dir, suffix
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ FOLDER MODE                                                                 │
+# │ Process all SVGs in a directory that contain text elements.                 │
+# │ Files without <text>, <tspan>, or <textPath> elements are skipped.          │
+# │                                                                             │
+# │ Required fields:                                                            │
+# │   path:       Source directory (trailing slash recommended for clarity)     │
+# │   output_dir: Where converted files go (created automatically)              │
+# │   suffix:     Added to filename: icon.svg → icon_converted.svg              │
+# └─────────────────────────────────────────────────────────────────────────────┘
 #
-# 2. FILE MODE - Process a single file with explicit output path
-#    Auto-detected when 'path' is a file.
-#    Required fields: path, output
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ FILE MODE                                                                   │
+# │ Process a single file with an explicit output path.                         │
+# │ Use when you need precise control over input/output locations.              │
+# │                                                                             │
+# │ Required fields:                                                            │
+# │   path:   Source SVG file                                                   │
+# │   output: Full output path including filename                               │
+# └─────────────────────────────────────────────────────────────────────────────┘
 #
-# You can mix folder and file entries in the same config.
+# TIP: You can mix folder and file entries freely in the same config.
 
 inputs:
 
-  # ---------------------------------------------------------------------------
-  # Example: Folder Mode
-  # ---------------------------------------------------------------------------
-  # Process all SVG files containing text elements in a directory.
-  # Only files with <text>, <tspan>, or <textPath> elements are processed.
-  # Files without text elements are automatically skipped.
+  # ── FOLDER MODE EXAMPLE ────────────────────────────────────────────────────
+  # Delete or modify this example to match your project structure.
+  #
+  - path: ./input_folder/           # Source folder containing SVGs
+    output_dir: ./output_folder/    # Destination folder (created if missing)
+    suffix: _converted              # Output: logo.svg → logo_converted.svg
 
-  - path: ./input_folder/           # Source folder (must exist)
-    output_dir: ./output_folder/    # Destination folder (created if needed)
-    suffix: _converted              # Suffix added to output filenames
-                                    # Example: icon.svg -> icon_converted.svg
+  # ── FILE MODE EXAMPLES (uncomment to use) ──────────────────────────────────
+  #
+  # Single file with explicit output path:
+  # - path: ./assets/logo.svg
+  #   output: ./dist/brand/logo_paths.svg
+  #
+  # Multiple individual files:
+  # - path: ./branding/wordmark.svg
+  #   output: ./web/assets/wordmark-paths.svg
+  #
+  # - path: ./branding/icon.svg
+  #   output: ./mobile/resources/icon-paths.svg
 
-  # ---------------------------------------------------------------------------
-  # Example: File Mode
-  # ---------------------------------------------------------------------------
-  # Process a single SVG file with explicit output path.
-
-  # - path: ./assets/logo.svg                    # Source file (must exist)
-  #   output: ./dist/brand/logo_paths.svg        # Full output path
-
-  # ---------------------------------------------------------------------------
-  # More Examples
-  # ---------------------------------------------------------------------------
-
-  # Multiple folders with different suffixes:
+  # ── MULTIPLE FOLDERS EXAMPLE (uncomment to use) ────────────────────────────
+  #
+  # Process different icon sizes with different suffixes:
   # - path: ./icons/small/
   #   output_dir: ./dist/icons/small/
   #   suffix: _sm
-
+  #
   # - path: ./icons/large/
   #   output_dir: ./dist/icons/large/
   #   suffix: _lg
-
-  # Individual files with custom output locations:
-  # - path: ./branding/wordmark.svg
-  #   output: ./web/assets/wordmark-paths.svg
-
-  # - path: ./branding/icon.svg
-  #   output: ./mobile/resources/icon-paths.svg
 
 
 # -----------------------------------------------------------------------------
 # OUTPUT LOG FILE
 # -----------------------------------------------------------------------------
-# Path to save the JSON log report after batch completion.
-# The log contains:
-#   - Timestamp and settings used
-#   - Summary counts (success, skipped, errors)
-#   - Per-file details (status, text/path counts, verification results)
+# JSON report generated after batch completion, containing:
 #
-# Default: batch_conversion_log.json (in current directory)
+#   - timestamp: When the batch ran
+#   - settings: Configuration used
+#   - summary: { total, success, skipped, errors }
+#   - files: Array of per-file results:
+#       - input/output paths
+#       - status: "success" | "skipped" | "error"
+#       - text_elements: count found
+#       - path_elements: count generated
+#       - diff_percent: visual diff (if verify=true)
+#       - verify_passed: true/false (if verify=true)
+#
+# Use this log to audit conversions or integrate with CI/CD pipelines.
+#
+# Default: batch_conversion_log.json
 
 log_file: batch_conversion_log.json
+
+
+# =============================================================================
+# TIPS
+# =============================================================================
+#
+# 1. TEST WITH ONE FILE FIRST
+#    Before running a large batch, test with a single file to verify settings:
+#      text2path convert test.svg -o test_out.svg --precision 6
+#
+# 2. CHECK AVAILABLE FONTS
+#    If conversions fail due to missing fonts:
+#      text2path fonts list           # See what's available
+#      text2path fonts find "Arial"   # Search for a specific font
+#
+# 3. AUTO-DOWNLOAD MISSING FONTS
+#    Enable auto_download in settings to automatically install missing fonts.
+#    Requires: fontget (https://github.com/Graphixa/FontGet) or fnt
+#
+# 4. VERIFY CONVERSION QUALITY
+#    Enable verify=true to compare original vs converted visually.
+#    The log will show diff percentages for each file.
+#
+# 5. PARALLEL PROCESSING
+#    Increase 'jobs' for faster processing on multi-core systems.
+#    Decrease to 1 if you encounter memory issues.
+#
+# =============================================================================
 """
 
 

@@ -239,8 +239,8 @@ text2path convert input --format html -o output.html
 # Output as base64 data URI
 text2path convert input.svg --base64 -o encoded.txt
 
-# Batch convert multiple files
-text2path batch convert *.svg --output-dir ./converted/
+# Batch convert with YAML config (see "Batch Processing" section)
+text2path batch template config.yaml && text2path batch convert config.yaml
 
 # Compare original and converted visually
 text2path compare original.svg converted.svg --threshold 0.5
@@ -276,13 +276,14 @@ result = converter.convert_file("logo_with_text.svg", "logo_paths.svg")
 
 ### 2. Batch Processing Design Assets
 
-```bash
-# Convert all SVGs in a directory
-text2path batch convert assets/*.svg --output-dir dist/
+For simple batch operations, use glob patterns:
 
-# Compare against reference renders
-text2path batch compare --samples-dir ./reference --threshold 0.3
+```bash
+# Quick batch with glob pattern
+for f in assets/*.svg; do text2path convert "$f" -o "dist/${f%.svg}_paths.svg"; done
 ```
+
+For complex workflows with multiple folders, verification, and reporting, use YAML configuration (see [Batch Processing](#batch-processing) below).
 
 ### 3. Verifying Conversion Quality
 
@@ -361,6 +362,83 @@ export TEXT2PATH_LOG_LEVEL=DEBUG
 export TEXT2PATH_IGNORE_SIZE_LIMITS=true   # Bypass file size limits (use with caution)
 export TEXT2PATH_MAX_FILE_SIZE_MB=100      # Custom max file size (default: 50)
 export TEXT2PATH_MAX_DECOMPRESSED_SIZE_MB=200  # Custom max decompressed size (default: 100)
+```
+
+## Batch Processing
+
+For converting multiple files with advanced options like verification, parallel processing, and detailed logging, use YAML-based batch configuration.
+
+### Quick Start
+
+```bash
+# 1. Generate a configuration template
+text2path batch template my_batch.yaml
+
+# 2. Edit the template (follow the comments inside)
+#    - Configure the 'inputs' section (required)
+#    - Adjust settings if needed (optional)
+
+# 3. Run the batch conversion
+text2path batch convert my_batch.yaml
+```
+
+### Why Use Batch Mode?
+
+| Use Case | Benefit |
+|----------|---------|
+| **Multiple folders** | Process different directories with different output settings |
+| **Verification** | Automatically compare original vs converted visually |
+| **Parallel processing** | Speed up conversions on multi-core systems |
+| **CI/CD integration** | JSON log reports for automated pipelines |
+| **Reproducible builds** | Version-controlled configuration files |
+
+### Template Structure
+
+The generated template is extensively documented with:
+- All available settings with their default values
+- Clear explanations of each option
+- Example configurations for common scenarios
+- Tips for troubleshooting
+
+**Don't duplicate the template documentation here** - generate the template and read the comments inside:
+
+```bash
+text2path batch template --help     # See template command options
+text2path batch template config.yaml  # Generate the template
+```
+
+### Example Workflow
+
+```bash
+# Generate template
+text2path batch template project_batch.yaml
+
+# Edit: uncomment and modify the inputs section
+# (the template has examples for both folder and file modes)
+
+# Run batch conversion
+text2path batch convert project_batch.yaml
+
+# Check the log for results
+cat batch_conversion_log.json | jq '.summary'
+# Output: { "total": 42, "success": 40, "skipped": 2, "errors": 0 }
+```
+
+### Available Commands
+
+```bash
+# Generate configuration template
+text2path batch template [output.yaml]    # Default: batch_config.yaml
+text2path batch template config.yaml -f   # --force to overwrite
+
+# Run batch conversion
+text2path batch convert config.yaml
+
+# Compare converted files against originals
+text2path batch compare --samples-dir ./samples --threshold 0.5
+
+# Track conversion quality over time
+text2path batch regression --registry ./history.json
 ```
 
 ## API Reference
