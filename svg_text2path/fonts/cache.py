@@ -313,13 +313,10 @@ class FontCache:
                         if meta:
                             results.append(meta)
                 except (OSError, KeyError, AttributeError, TTLibError) as e:
-                    # TTC collection may be malformed - mark as corrupted
+                    # TTC collection is malformed - mark as corrupted and skip
                     self._add_corrupted_font(path, 0)
-                    print(f"⚠️  TTC collection read error for {path}: {e}")
-                    tt = TTFont(path, lazy=True, fontNumber=0)
-                    meta = self._extract_single_font_meta(path, 0, tt, need_flags)
-                    if meta:
-                        results.append(meta)
+                    logger.warning("TTC collection read error for %s: %s", path, e)
+                    return None
             else:
                 # Single font file
                 tt = TTFont(path, lazy=True)
@@ -331,7 +328,7 @@ class FontCache:
         except (OSError, KeyError, AttributeError, ValueError, TTLibError) as e:
             # Font file unreadable or malformed - mark as corrupted and skip
             self._add_corrupted_font(path, 0)
-            print(f"⚠️  Font metadata read error for {path}: {e}")
+            logger.warning("Font metadata read error for %s: %s", path, e)
             return None
 
     def _extract_single_font_meta(
@@ -354,7 +351,8 @@ class FontCache:
             weight = 400
             try:
                 if "OS/2" in tt:
-                    weight = int(tt["OS/2"].usWeightClass)
+                    # fontTools type stubs don't fully describe OS/2 table attributes
+                    weight = int(tt["OS/2"].usWeightClass)  # type: ignore[attr-defined]
             except (KeyError, AttributeError, TypeError):
                 # OS/2 table missing or malformed - use default weight
                 pass
@@ -801,8 +799,12 @@ class FontCache:
                     best_candidate = (path, st, font_index)
 
         if best_candidate:
+            path, _, font_index = best_candidate
+            # Skip if font became corrupted after cache was built
+            if self._is_font_corrupted(path, font_index):
+                return None
             # Return path and cached font_index directly (no need to re-scan TTC)
-            return (best_candidate[0], best_candidate[2])
+            return (path, font_index)
         return None
 
     def _match_font_with_fc(
@@ -921,6 +923,10 @@ class FontCache:
             if pattern in self._fc_match_cache:
                 cached_result = self._fc_match_cache[pattern]
                 if cached_result is not None:
+                    # Skip if font became corrupted after being cached
+                    path, idx = cached_result
+                    if self._is_font_corrupted(path, idx):
+                        continue
                     return cached_result
                 # Pattern was tried before but failed, try next pattern
                 continue
@@ -958,9 +964,15 @@ class FontCache:
                                     font_file,
                                     self._build_style_label(weight, style, stretch),
                                 )
+                                # Skip if font is corrupted
+                                if self._is_font_corrupted(matched[0], matched[1]):
+                                    continue
                                 # Cache the result
                                 self._fc_match_cache[pattern] = matched
                                 return matched
+                            # Skip if font is corrupted
+                            if self._is_font_corrupted(font_file, font_index):
+                                continue
                             # Cache the result
                             matched_result = (font_file, font_index)
                             self._fc_match_cache[pattern] = matched_result

@@ -306,3 +306,34 @@ class TestCorruptedFontDetection:
         # Should return None since it's corrupted
         result = cache._read_font_meta(fake_font, False)
         assert result is None
+
+    def test_match_exact_skips_corrupted_fonts(self, tmp_path):
+        """Verify _match_exact skips fonts marked as corrupted."""
+        cache = FontCache()
+        # Create a fake cache entry with a corrupted font path
+        fake_font_path = tmp_path / "fake.ttf"
+        cache._fc_cache = [
+            (fake_font_path, 0, ["testfont"], ["regular"], "testfont", 400),
+        ]
+        # Mark as corrupted
+        cache._corrupted_fonts.add((str(fake_font_path), 0))
+        # Should return None since the only match is corrupted
+        result = cache._match_exact("testfont", 400, "normal", "normal", None)
+        assert result is None
+
+    def test_get_font_catches_ttlib_error_and_marks_corrupted(self, tmp_path):
+        """Verify get_font catches TTLibError and marks font as corrupted."""
+        cache = FontCache()
+        cache._cache_file = tmp_path / "font_cache.json"
+        # Create a fake font file with invalid content
+        fake_font = tmp_path / "invalid.ttf"
+        fake_font.write_bytes(b"not a real font")
+        # Mock _match_font_with_fc to return our fake font
+        cache._fc_cache = [
+            (fake_font, 0, ["fakefont"], ["regular"], "fakefont", 400),
+        ]
+        # Attempt to get the font - should catch TTLibError and return None
+        result = cache.get_font("fakefont", weight=400, style="normal")
+        assert result is None
+        # Font should now be marked as corrupted
+        assert (str(fake_font), 0) in cache._corrupted_fonts
