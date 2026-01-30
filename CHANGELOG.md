@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Conversion verification**: `--verify` CLI flag verifies conversion faithfulness using sbb-compare
   - Visual diff comparison between original and converted SVG
-  - `--verify-threshold` option sets max acceptable diff percentage (default: 0.5%)
+  - `--verify-pixel-threshold` sets pixel color difference sensitivity (1-255, default: 10)
+  - `--verify-image-threshold` sets max acceptable diff percentage (default: 5.0%)
   - Uses `bunx sbb-compare` for pixel-accurate visual comparison
 
 ## [0.4.3] - 2026-01-30

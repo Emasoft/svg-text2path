@@ -161,11 +161,18 @@ def _resolve_output_path(
     help="Verify conversion faithfulness using sbb-compare visual diff (requires Bun)",
 )
 @click.option(
-    "--verify-threshold",
-    "verify_threshold",
+    "--verify-pixel-threshold",
+    "verify_pixel_threshold",
+    type=int,
+    default=10,
+    help="Pixel color difference threshold 1-255 for --verify (default: 10)",
+)
+@click.option(
+    "--verify-image-threshold",
+    "verify_image_threshold",
     type=float,
-    default=0.5,
-    help="Max acceptable diff percentage for --verify (default: 0.5%%)",
+    default=5.0,
+    help="Max acceptable diff percentage for --verify (default: 5.0%%)",
 )
 @click.pass_context
 def convert(
@@ -188,7 +195,8 @@ def convert(
     auto_download: bool,
     validate_svg: bool,
     verify_conversion: bool,
-    verify_threshold: float,
+    verify_pixel_threshold: int,
+    verify_image_threshold: float,
 ) -> None:
     """Convert SVG text elements to paths.
 
@@ -374,7 +382,12 @@ def convert(
     # Verify conversion faithfulness using sbb-compare (only for SVG file sources)
     if verify_conversion and match.source_type == "file":
         _verify_conversion_with_sbb_compare(
-            input_source, out, verify_threshold, quiet, console
+            input_source,
+            out,
+            verify_pixel_threshold,
+            verify_image_threshold,
+            quiet,
+            console,
         )
 
 
@@ -424,14 +437,23 @@ def _write_base64_output(tree: Any, output_path: Path) -> None:
 def _verify_conversion_with_sbb_compare(
     original: str,
     converted: Path,
-    threshold: float,
+    pixel_threshold: int,
+    image_threshold: float,
     quiet: bool,
     console: Console,
 ) -> None:
     """Verify conversion faithfulness using sbb-compare visual diff.
 
     Runs bunx sbb-compare to compute pixel difference between original
-    and converted SVG. Reports pass/fail based on threshold.
+    and converted SVG. Reports pass/fail based on thresholds.
+
+    Args:
+        original: Path to original SVG file
+        converted: Path to converted SVG file
+        pixel_threshold: Pixel color difference threshold (1-255)
+        image_threshold: Max acceptable diff percentage for pass/fail
+        quiet: Suppress output
+        console: Rich console for output
     """
     import shutil
     import subprocess
@@ -469,6 +491,8 @@ def _verify_conversion_with_sbb_compare(
         "sbb-compare",
         "--quiet",  # Only output diff percentage
         "--headless",  # Don't open browser
+        "--threshold",
+        str(pixel_threshold),  # Pixel color diff threshold (1-255)
         str(orig_rel),
         str(conv_rel),
     ]
@@ -498,17 +522,17 @@ def _verify_conversion_with_sbb_compare(
                 pass
 
             if diff_pct is not None:
-                passed = diff_pct <= threshold
+                passed = diff_pct <= image_threshold
                 if not quiet:
                     if passed:
                         console.print(
                             f"[green]✓[/green] Verification passed: "
-                            f"{diff_pct:.2f}% diff (threshold: {threshold}%)"
+                            f"{diff_pct:.2f}% diff (threshold: {image_threshold}%)"
                         )
                     else:
                         console.print(
                             f"[red]✗[/red] Verification failed: "
-                            f"{diff_pct:.2f}% diff exceeds threshold {threshold}%"
+                            f"{diff_pct:.2f}% exceeds threshold {image_threshold}%"
                         )
             else:
                 # Could not parse diff percentage
