@@ -163,15 +163,19 @@ def check_python_package(
     # Module found, try to get version
     try:
         module = importlib.import_module(import_name)
-        version = getattr(module, "__version__", None)
-        if version is None:
-            # Try importlib.metadata as fallback
-            try:
-                from importlib.metadata import version as get_version
+        version = None
 
-                version = get_version(name)
-            except Exception:
-                pass
+        # Prefer importlib.metadata (avoids __version__ deprecation in Click 9.1+)
+        try:
+            from importlib.metadata import version as get_version
+
+            version = get_version(name)
+        except Exception:
+            pass
+
+        # Fall back to __version__ attribute for packages that don't use metadata
+        if version is None:
+            version = getattr(module, "__version__", None)
 
         info.version = version
         info.status = DependencyStatus.OK
