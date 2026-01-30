@@ -142,6 +142,18 @@ def _resolve_output_path(
     is_flag=True,
     help="Bypass file size limits (WARNING: may allow decompression bombs)",
 )
+@click.option(
+    "--auto-download",
+    "auto_download",
+    is_flag=True,
+    help="Auto-download missing fonts using fontget or fnt",
+)
+@click.option(
+    "--validate",
+    "validate_svg",
+    is_flag=True,
+    help="Validate input and output SVG using svg-matrix (requires Bun)",
+)
 @click.pass_context
 def convert(
     ctx: click.Context,
@@ -160,6 +172,8 @@ def convert(
     output_base64: bool,
     all_svgs: bool,
     no_size_limit: bool,
+    auto_download: bool,
+    validate_svg: bool,
 ) -> None:
     """Convert SVG text elements to paths.
 
@@ -222,12 +236,14 @@ def convert(
     if no_size_limit:
         config.security.ignore_size_limits = True
 
-    # Create converter
+    # Create converter with optional auto-download and validation
     converter = Text2PathConverter(
         precision=precision,
         preserve_styles=preserve_styles,
         log_level=log_level,
         config=config,
+        auto_download_fonts=auto_download,
+        validate_svg=validate_svg,
     )
 
     # Show what we detected
@@ -242,6 +258,27 @@ def convert(
         # Just analyze fonts without converting
         _print_fonts_used(match.handler, input_source)
         return
+
+    # Validate input if requested (only for file sources)
+    input_valid = None
+    if validate_svg and match.source_type == "file":
+        with console.status("[bold green]Validating input SVG..."):
+            from svg_text2path.tools.svg_validator import validate_svg_file
+
+            input_validation = validate_svg_file(input_source)
+            input_valid = input_validation.valid
+            if not quiet:
+                # Check if validation was skipped due to offline mode
+                if input_validation.error and "offline mode" in input_validation.error:
+                    console.print("[dim]⊘ Validation skipped (offline mode)[/dim]")
+                elif input_valid:
+                    console.print("[green]✓[/green] Input SVG is valid")
+                else:
+                    console.print("[yellow]⚠[/yellow] Input SVG has issues:")
+                    for issue in input_validation.issues:
+                        console.print(f"  - {issue.get('reason', str(issue))}")
+                    if input_validation.error:
+                        console.print(f"  - {input_validation.error}")
 
     # Parse input using handler
     with console.status("[bold green]Parsing input..."):
@@ -294,6 +331,30 @@ def convert(
         f"text elements to {path_count} paths"
     )
     console.print(f"[blue]Output:[/blue] {out}")
+
+    # Validate output if requested (only for SVG file outputs)
+    if validate_svg and out.suffix.lower() in (".svg", ".svgz"):
+        with console.status("[bold green]Validating output SVG..."):
+            from svg_text2path.tools.svg_validator import validate_svg_file
+
+            output_validation = validate_svg_file(out)
+            if not quiet:
+                # Check if validation was skipped due to offline mode
+                if (
+                    output_validation.error
+                    and "offline mode" in output_validation.error
+                ):
+                    console.print(
+                        "[dim]⊘ Output validation skipped (offline mode)[/dim]"
+                    )
+                elif output_validation.valid:
+                    console.print("[green]✓[/green] Output SVG is valid")
+                else:
+                    console.print("[yellow]⚠[/yellow] Output SVG has issues:")
+                    for issue in output_validation.issues:
+                        console.print(f"  - {issue.get('reason', str(issue))}")
+                    if output_validation.error:
+                        console.print(f"  - {output_validation.error}")
 
 
 def _print_fonts_used(handler: Any, source: str) -> None:

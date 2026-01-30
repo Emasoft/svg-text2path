@@ -3,6 +3,7 @@
 This subpackage provides:
 - Auto-installer for font tools (FontGet, fnt, nerdconvert)
 - svg-bbox wrapper for visual comparison
+- svg-matrix SVG validation via Bun
 - External tool invocation utilities
 """
 
@@ -26,6 +27,12 @@ from svg_text2path.tools.svg_bbox import (
     compare_svgs,
     get_bounding_boxes,
 )
+from svg_text2path.tools.svg_validator import (
+    SVGValidationResult,
+    validate_svg_batch,
+    validate_svg_file,
+    validate_svg_string,
+)
 
 __all__ = [
     # external.py
@@ -45,4 +52,9 @@ __all__ = [
     "ComparisonResult",
     "compare_svgs",
     "get_bounding_boxes",
+    # svg_validator.py
+    "SVGValidationResult",
+    "validate_svg_file",
+    "validate_svg_string",
+    "validate_svg_batch",
 ]

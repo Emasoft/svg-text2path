@@ -24,7 +24,7 @@ from xml.etree.ElementTree import (
     register_namespace as _register_namespace,
 )
 
-from fontTools.pens.recordingPen import RecordingPen
+from fontTools.pens.recordingPen import RecordingPen  # type: ignore[import-untyped]
 from svg.path import parse_path
 
 from svg_text2path.config import Config
@@ -72,6 +72,15 @@ class ConversionResult:
     missing_fonts: list[str] = field(default_factory=list)
     """List of font specifications that could not be resolved."""
 
+    input_valid: bool | None = None
+    """Whether input SVG passed validation (None if not validated)."""
+
+    output_valid: bool | None = None
+    """Whether output SVG passed validation (None if not validated)."""
+
+    validation_issues: list[str] = field(default_factory=list)
+    """List of SVG validation issues found."""
+
 
 class Text2PathConverter:
     """Main converter class for SVG text-to-path conversion.
@@ -98,6 +107,8 @@ class Text2PathConverter:
         preserve_styles: bool = False,
         log_level: str = "WARNING",
         config: Config | None = None,
+        auto_download_fonts: bool = False,
+        validate_svg: bool = False,
     ) -> None:
         """Initialize the converter.
 
@@ -109,8 +120,14 @@ class Text2PathConverter:
             log_level: Logging level (DEBUG, INFO, WARNING, ERROR).
             config: Optional full Config object. If provided, overrides
                    individual precision/preserve_styles/log_level args.
+            auto_download_fonts: If True, attempt to download missing fonts
+                using fontget or fnt tools.
+            validate_svg: If True, validate input and output SVG files
+                using svg-matrix (requires Bun).
         """
         self.config = config or Config.load()
+        self.auto_download_fonts = auto_download_fonts
+        self.validate_svg = validate_svg
 
         # Override config with explicit args if provided
         if precision != 6:
@@ -173,6 +190,22 @@ class Text2PathConverter:
         else:
             output_path = Path(output_path)
 
+        # Validate input SVG if enabled
+        if self.validate_svg:
+            from svg_text2path.tools.svg_validator import validate_svg_file
+
+            input_validation = validate_svg_file(input_path)
+            # Store validation results (will be added to result later)
+            input_valid = input_validation.valid
+            input_issues = [
+                f"Input: {i.get('reason', str(i))}" for i in input_validation.issues
+            ]
+            if input_validation.error:
+                input_issues.append(f"Input validation error: {input_validation.error}")
+        else:
+            input_valid = None
+            input_issues = []
+
         # Parse SVG
         try:
             tree = parse_svg(input_path)
@@ -189,20 +222,58 @@ class Text2PathConverter:
             write_svg(tree, output_path)
             result.output = output_path
 
+            # Validate output SVG if enabled
+            if self.validate_svg:
+                from svg_text2path.tools.svg_validator import validate_svg_file
+
+                output_validation = validate_svg_file(output_path)
+                result.output_valid = output_validation.valid
+                for issue in output_validation.issues:
+                    input_issues.append(f"Output: {issue.get('reason', str(issue))}")
+                if output_validation.error:
+                    input_issues.append(
+                        f"Output validation error: {output_validation.error}"
+                    )
+            else:
+                result.output_valid = None
+
+        # Set validation results on result object
+        result.input_valid = input_valid
+        result.validation_issues = input_issues
+
         return result
 
-    def convert_string(self, svg_content: str) -> str:
+    def convert_string(
+        self, svg_content: str, return_result: bool = False
+    ) -> str | tuple[str, ConversionResult]:
         """Convert all text elements in an SVG string to paths.
 
         Args:
             svg_content: SVG content as string.
+            return_result: If True, also return ConversionResult with
+                validation info. Default False for backward compatibility.
 
         Returns:
-            Converted SVG as string.
+            Converted SVG as string, or tuple of (string, ConversionResult)
+            if return_result is True.
 
         Raises:
             SVGParseError: If SVG parsing fails.
         """
+        # Validate input SVG if enabled
+        input_valid = None
+        input_issues: list[str] = []
+        if self.validate_svg:
+            from svg_text2path.tools.svg_validator import validate_svg_string
+
+            input_validation = validate_svg_string(svg_content)
+            input_valid = input_validation.valid
+            input_issues = [
+                f"Input: {i.get('reason', str(i))}" for i in input_validation.issues
+            ]
+            if input_validation.error:
+                input_issues.append(f"Input validation error: {input_validation.error}")
+
         # Parse SVG string
         try:
             root = parse_svg_string(svg_content)
@@ -212,7 +283,7 @@ class Text2PathConverter:
             raise SVGParseError(f"Failed to parse SVG string: {e}") from e
 
         # Convert
-        self._convert_tree(tree, input_format="string")
+        result = self._convert_tree(tree, input_format="string")
 
         # Serialize back to string
         # Register namespaces
@@ -221,7 +292,31 @@ class Text2PathConverter:
 
         buffer = StringIO()
         tree.write(buffer, encoding="unicode", xml_declaration=True)
-        return buffer.getvalue()
+        output_svg = buffer.getvalue()
+
+        # Validate output SVG if enabled
+        output_valid = None
+        if self.validate_svg:
+            from svg_text2path.tools.svg_validator import validate_svg_string
+
+            output_validation = validate_svg_string(output_svg)
+            output_valid = output_validation.valid
+            for issue in output_validation.issues:
+                input_issues.append(f"Output: {issue.get('reason', str(issue))}")
+            if output_validation.error:
+                input_issues.append(
+                    f"Output validation error: {output_validation.error}"
+                )
+
+        # Set validation results
+        result.input_valid = input_valid
+        result.output_valid = output_valid
+        result.validation_issues = input_issues
+        result.output = output_svg
+
+        if return_result:
+            return output_svg, result
+        return output_svg
 
     def convert_tree(self, tree: ElementTree) -> ElementTree:
         """Convert all text elements in an ElementTree to paths.
@@ -407,10 +502,13 @@ class Text2PathConverter:
         if text_anchor is None:
             text_anchor = "start"
 
-        # Get font from cache
+        # Get font from cache (with optional auto-download of missing fonts)
         try:
             font_result = self.font_cache.get_font(
-                font_family, weight=weight, style=font_style
+                font_family,
+                weight=weight,
+                style=font_style,
+                auto_download=self.auto_download_fonts,
             )
             if font_result is None:
                 # Font not found, return None to indicate conversion not possible

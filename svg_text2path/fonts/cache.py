@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 
 
 class FontCache:
@@ -730,17 +730,26 @@ class FontCache:
             self._build_style_label(weight, style, stretch)
         )
 
-        # Build candidate patterns from specific to generic (prefer Regular)
+        # Build candidate patterns from specific to generic
+        # Priority: match style (italic) first, then weight
         style_name = self._weight_to_style(weight)
         patterns: list[str] = []
+        slant_suffix = ":slant=italic" if style == "italic" else ""
+        slant_suffix = ":slant=oblique" if style == "oblique" else slant_suffix
+
         if weight == 400 and style == "normal":
             patterns.append(f"{font_family}:style=Regular:weight=400")
         if weight == 400 and style == "italic":
             patterns.append(f"{font_family}:style=Italic:weight=400:slant=italic")
+        # For non-400 weights with italic/oblique, include slant in pattern
         if style_name and weight != 400:
-            patterns.append(f"{font_family}:style={style_name}")
+            if style in ("italic", "oblique"):
+                # Try combined style name like "SemiBold Italic"
+                combined = f"{style_name} {style.capitalize()}"
+                patterns.append(f"{font_family}:style={combined}{slant_suffix}")
+            patterns.append(f"{font_family}:style={style_name}{slant_suffix}")
         if weight != 400:
-            patterns.append(f"{font_family}:weight={weight}")
+            patterns.append(f"{font_family}:weight={weight}{slant_suffix}")
 
         base = f"{font_family}"
         if style == "italic":
@@ -864,6 +873,7 @@ class FontCache:
         stretch: str = "normal",
         inkscape_spec: str | None = None,
         strict_family: bool = True,
+        auto_download: bool = False,
     ) -> tuple[TTFont, bytes, int] | None:
         """Load font strictly; return None if exact face not found.
 
@@ -875,6 +885,9 @@ class FontCache:
             style: CSS font-style
             stretch: CSS font-stretch
             inkscape_spec: Inkscape font specification hint (e.g., 'Futura Medium')
+            strict_family: If True, warn on family mismatch
+            auto_download: If True, attempt to download missing fonts using
+                fontget or fnt tools
 
         Returns:
             Tuple of (TTFont, font_blob_bytes, face_index) or None.
@@ -911,6 +924,28 @@ class FontCache:
                 )
             if match_result is None and font_family in ("sans-serif", "sans"):
                 match_result = self._match_font_with_fc("sans", weight, style, stretch)
+
+            # If still not found and auto_download is enabled, try to download
+            if match_result is None and auto_download:
+                from svg_text2path.fonts.downloader import (
+                    auto_download_font,
+                    refresh_font_cache,
+                )
+
+                print(f"Font '{font_family}' not found locally, attempting download...")
+                result = auto_download_font(font_family)
+                if result.success:
+                    print(f"✓ {result.message}")
+                    # Refresh font cache and clear our caches
+                    refresh_font_cache()
+                    self._fc_match_cache.clear()
+                    # Retry matching after download
+                    match_result = self._match_font_with_fc(
+                        font_family, weight, style, stretch
+                    )
+                else:
+                    print(f"✗ {result.message}")
+
             if match_result is None:
                 return None
 
