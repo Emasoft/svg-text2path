@@ -39,14 +39,7 @@ jobs:
         continue-on-error: true
 
       - name: Run tests with pytest
-        run: uv run pytest tests/ -v --tb=short --cov=svg_text2path --cov-report=xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: uv run pytest tests/ -v --tb=short
 
   lint:
     runs-on: ubuntu-latest
