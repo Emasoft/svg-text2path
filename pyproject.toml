@@ -92,6 +92,8 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Visual tests contain long SVG content strings that cannot be shortened
 "tests/test_visual_comparison.py" = ["E501"]
+# E2E tests contain embedded SVG test fixtures
+"tests/test_e2e_conversion.py" = ["E501"]
 # Format handler tests contain embedded SVG test fixtures
 "tests/test_format_python_code.py" = ["E501"]
 
