@@ -1,6 +1,6 @@
 [project]
 name = "svg-text2path"
-version = "0.4.9"
+version = "0.5.0"
 description = "Convert SVG text elements to path outlines with HarfBuzz shaping"
 readme = "README.md"
 license = { text = "MIT" }
@@ -96,6 +96,10 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 "tests/test_e2e_conversion.py" = ["E501"]
 # Format handler tests contain embedded SVG test fixtures
 "tests/test_format_python_code.py" = ["E501"]
+# Font downloader tests use deeply nested mocks requiring long lines
+"tests/test_font_downloader.py" = ["E501", "SIM117"]
+# Font CLI tests contain embedded SVG test fixtures
+"tests/test_fonts_cli.py" = ["E501"]
 
 [tool.pyright]
 include = ["svg_text2path", "examples"]

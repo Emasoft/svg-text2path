@@ -267,7 +267,8 @@ class InkscapeHandler(FormatHandler):
                     path, max_size=max_size, ignore_limits=ignore_limits
                 )
                 root = ET.fromstring(content)
-                return cast(ElementTree, ET.ElementTree(root))
+                # defusedxml stubs incomplete - ElementTree exists at runtime
+                return cast(ElementTree, ET.ElementTree(root))  # type: ignore[attr-defined]
             return cast(ElementTree, ET.parse(str(path)))
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG: {e}") from e
@@ -283,7 +284,8 @@ class InkscapeHandler(FormatHandler):
         """
         try:
             root = ET.fromstring(svg_str)
-            return cast(ElementTree, ET.ElementTree(root))
+            # defusedxml stubs incomplete - ElementTree exists at runtime
+            return cast(ElementTree, ET.ElementTree(root))  # type: ignore[attr-defined]
         except ET.ParseError as e:
             raise SVGParseError(f"Failed to parse Inkscape SVG string: {e}") from e
 
