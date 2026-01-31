@@ -233,8 +233,8 @@ class TestVisualComparison:
         result = run_sbb_compare(orig_path, conv_path, visual_output_dir)
 
         assert result is not None, "Visual comparison failed"
-        assert result.diff_percent < 5.0, (
-            f"Simple text diff {result.diff_percent:.2f}% exceeds 5% threshold"
+        assert result.diff_percent < 2.0, (
+            f"Simple text diff {result.diff_percent:.2f}% exceeds 2% threshold"
         )
 
     def test_multiple_fonts_conversion(
@@ -259,8 +259,8 @@ class TestVisualComparison:
         result = run_sbb_compare(orig_path, conv_path, visual_output_dir)
 
         assert result is not None, "Visual comparison failed"
-        assert result.diff_percent < 10.0, (
-            f"Multi-font diff {result.diff_percent:.2f}% exceeds 10% threshold"
+        assert result.diff_percent < 3.0, (
+            f"Multi-font diff {result.diff_percent:.2f}% exceeds 3% threshold"
         )
 
     def test_textpath_conversion(
@@ -287,8 +287,8 @@ class TestVisualComparison:
         result = run_sbb_compare(orig_path, conv_path, visual_output_dir)
 
         assert result is not None, "Visual comparison failed"
-        assert result.diff_percent < 15.0, (
-            f"TextPath diff {result.diff_percent:.2f}% exceeds 15% threshold"
+        assert result.diff_percent < 8.0, (
+            f"TextPath diff {result.diff_percent:.2f}% exceeds 8% threshold"
         )
 
     def test_bold_italic_variants(
@@ -312,8 +312,8 @@ class TestVisualComparison:
         result = run_sbb_compare(orig_path, conv_path, visual_output_dir)
 
         assert result is not None, "Visual comparison failed"
-        assert result.diff_percent < 10.0, (
-            f"Font variants diff {result.diff_percent:.2f}% exceeds 10% threshold"
+        assert result.diff_percent < 3.0, (
+            f"Font variants diff {result.diff_percent:.2f}% exceeds 3% threshold"
         )
 
     @pytest.mark.skipif(
@@ -331,8 +331,8 @@ class TestVisualComparison:
 
         assert result is not None, "Visual comparison failed"
         # Advanced sample has more complex text, allow higher threshold
-        assert result.diff_percent < 15.0, (
-            f"Advanced sample diff {result.diff_percent:.2f}% exceeds 15% threshold"
+        assert result.diff_percent < 8.0, (
+            f"Advanced sample diff {result.diff_percent:.2f}% exceeds 8% threshold"
         )
 
     @pytest.mark.skipif(
@@ -366,7 +366,7 @@ class TestVisualComparison:
 
         # Our conversion should be within 5% of Inkscape quality
         gap = our_result.diff_percent - inkscape_result.diff_percent
-        assert gap < 5.0, (
+        assert gap < 2.0, (
             f"Our conversion ({our_result.diff_percent:.2f}%) is more than 5% "
             f"worse than Inkscape ({inkscape_result.diff_percent:.2f}%)"
         )

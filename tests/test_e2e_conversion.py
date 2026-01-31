@@ -214,8 +214,8 @@ class TestE2EConversionPipeline:
         # Visual verification with sbb-compare
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 5.0, (
-            f"Visual diff {compare_result.diff_percent:.2f}% exceeds 5% threshold"
+        assert compare_result.diff_percent < 2.0, (
+            f"Visual diff {compare_result.diff_percent:.2f}% exceeds 2% threshold"
         )
 
     def test_programmatic_api_convert_string(self, converter, tmp_path: Path):
@@ -242,8 +242,8 @@ class TestE2EConversionPipeline:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 5.0, (
-            f"Visual diff {compare_result.diff_percent:.2f}% exceeds 5% threshold"
+        assert compare_result.diff_percent < 2.0, (
+            f"Visual diff {compare_result.diff_percent:.2f}% exceeds 2% threshold"
         )
 
     def test_font_weight_variations(self, converter, tmp_path: Path):
@@ -265,20 +265,19 @@ class TestE2EConversionPipeline:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 10.0, (
-            f"Font weight diff {compare_result.diff_percent:.2f}% exceeds 10% threshold"
+        assert compare_result.diff_percent < 3.0, (
+            f"Font weight diff {compare_result.diff_percent:.2f}% exceeds 3% threshold"
         )
 
     def test_tspan_elements(self, converter, tmp_path: Path):
-        """Test tspan elements are accurately converted."""
+        """Test tspan elements are accurately converted.
+
+        Note: tspans must be on same line to avoid whitespace issues.
+        """
         svg_content = """<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="400" height="80" viewBox="0 0 400 80">
   <rect width="100%" height="100%" fill="white"/>
-  <text x="10" y="50" font-family="Helvetica" font-size="24">
-    <tspan fill="red">Red</tspan>
-    <tspan fill="green"> Green</tspan>
-    <tspan fill="blue"> Blue</tspan>
-  </text>
+  <text x="10" y="50" font-family="Helvetica" font-size="24" fill="black"><tspan>First </tspan><tspan>Second </tspan><tspan>Third</tspan></text>
 </svg>"""
         orig_path = tmp_path / "tspan_orig.svg"
         conv_path = tmp_path / "tspan_conv.svg"
@@ -293,8 +292,8 @@ class TestE2EConversionPipeline:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 10.0, (
-            f"Tspan diff {compare_result.diff_percent:.2f}% exceeds 10% threshold"
+        assert compare_result.diff_percent < 3.0, (
+            f"Tspan diff {compare_result.diff_percent:.2f}% exceeds 3% threshold"
         )
 
     def test_transform_handling(self, converter, tmp_path: Path):
@@ -319,8 +318,8 @@ class TestE2EConversionPipeline:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 15.0, (
-            f"Transform diff {compare_result.diff_percent:.2f}% exceeds 15% threshold"
+        assert compare_result.diff_percent < 3.0, (
+            f"Transform diff {compare_result.diff_percent:.2f}% exceeds 3% threshold"
         )
 
 
@@ -354,7 +353,7 @@ class TestE2EFontCacheIntegration:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 5.0
+        assert compare_result.diff_percent < 2.0
 
     def test_corrupted_font_fallback(self, tmp_path: Path):
         """Test that corrupted fonts are skipped and fallback works."""
@@ -387,7 +386,7 @@ class TestE2EFontCacheIntegration:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None, "sbb-compare failed"
-        assert compare_result.diff_percent < 10.0
+        assert compare_result.diff_percent < 3.0
 
     def test_cache_reuse_across_conversions(self, tmp_path: Path):
         """Test that font cache is properly reused across multiple conversions."""
@@ -430,8 +429,8 @@ class TestE2EFontCacheIntegration:
         result1 = run_sbb_compare(orig1, conv1)
         result2 = run_sbb_compare(orig2, conv2)
 
-        assert result1 is not None and result1.diff_percent < 5.0
-        assert result2 is not None and result2.diff_percent < 5.0
+        assert result1 is not None and result1.diff_percent < 2.0
+        assert result2 is not None and result2.diff_percent < 2.0
 
 
 @skip_on_ci
@@ -459,7 +458,7 @@ class TestE2EEdgeCases:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None
-        assert compare_result.diff_percent < 5.0
+        assert compare_result.diff_percent < 2.0
 
     def test_special_characters(self, converter, tmp_path: Path):
         """Test conversion handles special characters correctly."""
@@ -477,7 +476,7 @@ class TestE2EEdgeCases:
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None
-        assert compare_result.diff_percent < 10.0
+        assert compare_result.diff_percent < 3.0
 
     def test_unicode_text(self, converter, tmp_path: Path):
         """Test conversion handles Unicode text correctly."""
@@ -498,7 +497,7 @@ class TestE2EEdgeCases:
                 compare_result = run_sbb_compare(orig_path, conv_path)
                 # Allow higher threshold for Unicode due to font substitution
                 if compare_result is not None:
-                    assert compare_result.diff_percent < 30.0
+                    assert compare_result.diff_percent < 10.0
         except Exception:
             # Font missing is acceptable for this test
             pytest.skip("Unicode fonts not available")
@@ -556,9 +555,9 @@ class TestE2EPerformance:
         elapsed = time.time() - start
 
         # Should complete in reasonable time
-        assert elapsed < 30.0, f"Conversion took {elapsed:.1f}s (> 30s limit)"
+        assert elapsed < 10.0, f"Conversion took {elapsed:.1f}s (> 30s limit)"
 
         # Visual verification
         compare_result = run_sbb_compare(orig_path, conv_path)
         assert compare_result is not None
-        assert compare_result.diff_percent < 15.0
+        assert compare_result.diff_percent < 3.0
