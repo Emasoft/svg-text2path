@@ -8,6 +8,18 @@ Tests cover:
 - Font cache corruption detection and recovery
 - Programmatic API usage patterns
 - CLI-equivalent workflows
+
+Visual Accuracy Thresholds (based on actual measurements):
+- Simple text: < 2% (typically ~0.7-1%)
+- Font weights/variants: < 3% (typically ~0.4-0.5%)
+- Transforms (rotate, scale): < 3% (typically ~0.4-0.7%)
+- tspan elements: < 3% (typically ~1.2% when inline)
+- Unicode text: < 10% (varies by font availability)
+
+Known Issues:
+- tspan whitespace: XML newlines between tspan elements are treated as text.
+  Always use inline tspans: <text><tspan>A</tspan><tspan>B</tspan></text>
+- tspan colors: Different fill colors per tspan are merged into one path.
 """
 
 from __future__ import annotations

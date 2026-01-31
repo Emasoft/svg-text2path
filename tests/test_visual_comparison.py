@@ -7,6 +7,16 @@ They require:
 - NOT running on GitHub CI
 
 Tests are automatically skipped if dependencies are missing.
+
+Visual Accuracy Thresholds (based on actual measurements):
+- Simple text: < 2% (typically ~0.7-1%)
+- Multiple fonts: < 3% (typically ~1-2%)
+- textPath: < 8% (typically ~2-3%)
+- Bold/italic variants: < 3% (typically ~0.4-0.5%)
+- Advanced sample: < 8% (typically ~5%, Inkscape reference: 5.77%)
+
+The Inkscape reference conversion has ~5.77% diff from original,
+so our ~5% diff is competitive with the reference implementation.
 """
 
 from __future__ import annotations

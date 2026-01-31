@@ -11,6 +11,20 @@ Key features:
 - Persistent font cache with TTC/OTC collection support
 - Strict font matching with no silent fallbacks
 - fontconfig integration for browser-like font selection
+- Automatic corrupted font detection and exclusion
+
+Corruption Detection:
+    The FontCache automatically detects and excludes corrupted font files
+    that would cause TTLibError (e.g., "bad sfntVersion"). Corrupted fonts
+    are tracked in ~/.cache/svg-text2path/corrupted_fonts.json and skipped
+    in future operations. Detection occurs at three levels:
+
+    1. Cache build time (_read_font_meta): Validates fonts before caching
+    2. Font matching (_match_exact, _match_font_with_fc): Skips corrupted
+    3. Font loading (get_font): Catches TTLibError and marks as corrupted
+
+    Use clear_corrupted_fonts() to reset the exclusion list if fonts are
+    reinstalled or repaired.
 """
 
 import contextlib
